@@ -1,0 +1,7 @@
+{
+  "name": "LIS2DW12_ESP32",
+  "version": "0.1.0",
+  "description": "Minimal register-level LIS2DW12 driver for ESP32 (I2C)",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

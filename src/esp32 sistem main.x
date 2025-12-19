@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   delay(1000); // Seri portun oturması için bekleme
 
@@ -13,11 +14,11 @@ void setup() {
   // --- 2. Flash Bellek (NVRAM/Depolama) ---
   uint32_t flash_size = ESP.getFlashChipSize();
   uint32_t flash_speed = ESP.getFlashChipSpeed();
-  
+
   Serial.println("\n[FLASH BELLEK]");
   Serial.printf("Fiziksel Boyut: %d MB\n", flash_size / (1024 * 1024));
   Serial.printf("Hız: %d MHz\n", flash_speed / 1000000);
-  
+
   // Flash Modu (QIO, DIO, vb.) - Performans için önemlidir
   FlashMode_t ideMode = ESP.getFlashChipMode();
   Serial.printf("Flash Modu: %s\n", (ideMode == FM_QIO ? "QIO" : (ideMode == FM_QOUT ? "QOUT" : (ideMode == FM_DIO ? "DIO" : (ideMode == FM_DOUT ? "DOUT" : "UNKNOWN")))));
@@ -29,18 +30,22 @@ void setup() {
   Serial.printf("En Büyük Boş Blok: %d KB\n", ESP.getMaxAllocHeap() / 1024);
 
   // --- 4. PSRAM (Varsa Harici RAM) ---
-  if(psramFound()){
+  if (psramFound())
+  {
     Serial.printf("\n[PSRAM - Harici RAM]\n");
     Serial.printf("Toplam PSRAM: %d MB\n", ESP.getPsramSize() / (1024 * 1024));
     Serial.printf("Boş PSRAM: %d KB\n", ESP.getFreePsram() / 1024);
-  } else {
+  }
+  else
+  {
     Serial.println("\n[PSRAM]: Yok");
   }
 
   Serial.println("--------------------------------------");
 }
 
-void loop() {
+void loop()
+{
   // Tekrar etmesine gerek yok
   delay(10000);
 }

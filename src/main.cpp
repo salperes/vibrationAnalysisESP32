@@ -11,7 +11,7 @@
 // İstersen platformio.ini veya Arduino build flags ile override edebilirsin:
 // -D APP_VERSION="\"V3.1\"" -D BUILD_HASH="\"a1b2c3d\""
 #ifndef APP_VERSION
-#define APP_VERSION "V3.4"
+#define APP_VERSION "V3.5"
 #endif
 
 #ifndef BUILD_HASH
@@ -32,7 +32,7 @@ static String versionJson()
 
 // ----------------- USER WIFI -----------------
 const char *WIFI_SSID = "XXXX";
-const char *WIFI_PASS = "XXXXX";
+const char *WIFI_PASS = "XXXX";
 // ---------------------------------------------
 
 #define FFT_N 1024 // power of 2
@@ -134,6 +134,14 @@ static float g_calibAvg[6][3] = {0};
 // ======================= Live preview =======================
 static uint32_t g_liveLastMs = 0;
 static float g_live_g[3] = {0, 0, 0};
+static const uint16_t LIVE_PREVIEW_HZ = 800;
+static const float GRAVITY_MPS2 = 9.80665f;
+static float g_live_acc_mps2[3] = {0, 0, 0};
+static float g_live_vel_mmps[3] = {0, 0, 0};
+static float g_live_disp_mm[3] = {0, 0, 0};
+static float g_live_mag_acc = 0;
+static float g_live_mag_vel_mmps = 0;
+static float g_live_mag_disp_mm = 0;
 static volatile bool g_calDirty = true; // calibration changed -> reload NVS
 
 // ======================= WiFi/AP state =======================
@@ -907,9 +915,9 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     </div>
 
     <div class="card">
-      <h2>Live (1 Hz)</h2>
+      <h2>Live (1s preview @800 Hz)</h2>
       <canvas id="chart" width="420" height="160" style="width:100%;height:160px;border:1px solid #eee;border-radius:10px;background:#fff"></canvas>
-      <pre id="live">ax: -, ay: -, az: -</pre>
+      <pre id="live">acc: -, vel: -, disp: -</pre>
       <div class="small">Kayıt veya kalibrasyon sırasında live kapalıdır.</div>
     </div>
 
@@ -958,6 +966,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
 // ---- Mini chart (canvas) ----
 const CHART_N = 60;
+const GRAVITY = 9.80665;
 let axBuf = new Array(CHART_N).fill(0);
 let ayBuf = new Array(CHART_N).fill(0);
 let azBuf = new Array(CHART_N).fill(0);
@@ -1160,11 +1169,17 @@ async function refreshInfo(){
 async function refreshLive(){
   const j = await getJson("/api/live");
   if(j.enabled === false) return;
+  if(typeof j.ax !== "number") return;
 
-  document.getElementById("live").textContent =
-    `ax: ${j.ax.toFixed(3)} g\nay: ${j.ay.toFixed(3)} g\naz: ${j.az.toFixed(3)} g`;
+  const accLine = `ACC (m/s²)  X:${j.ax.toFixed(3)}  Y:${j.ay.toFixed(3)}  Z:${j.az.toFixed(3)}  MAG:${j.mag.toFixed(3)}`;
+  const velLine = `VEL (mm/s)  X:${j.vx_mmps.toFixed(2)}  Y:${j.vy_mmps.toFixed(2)}  Z:${j.vz_mmps.toFixed(2)}  MAG:${j.vmag_mmps.toFixed(2)}`;
+  const dispLine = `DISP (mm)   X:${j.dx_mm.toFixed(2)}  Y:${j.dy_mm.toFixed(2)}  Z:${j.dz_mm.toFixed(2)}  MAG:${j.dmag_mm.toFixed(2)}`;
+  document.getElementById("live").textContent = `${accLine}\n${velLine}\n${dispLine}`;
 
-  pushSample(j.ax, j.ay, j.az);
+  const gx = j.ax / GRAVITY;
+  const gy = j.ay / GRAVITY;
+  const gz = j.az / GRAVITY;
+  pushSample(gx, gy, gz);
   drawChart();
 }
 
@@ -1913,9 +1928,19 @@ void handleApiLive()
   {
     String s = "{";
     s += "\"enabled\":true,";
-    s += "\"ax\":" + String(g_live_g[0], 3) + ",";
-    s += "\"ay\":" + String(g_live_g[1], 3) + ",";
-    s += "\"az\":" + String(g_live_g[2], 3);
+    s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+    s += "\"ax\":" + String(g_live_acc_mps2[0], 3) + ",";
+    s += "\"ay\":" + String(g_live_acc_mps2[1], 3) + ",";
+    s += "\"az\":" + String(g_live_acc_mps2[2], 3) + ",";
+    s += "\"mag\":" + String(g_live_mag_acc, 3) + ",";
+    s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 2) + ",";
+    s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 2) + ",";
+    s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 2) + ",";
+    s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 2) + ",";
+    s += "\"dx_mm\":" + String(g_live_disp_mm[0], 2) + ",";
+    s += "\"dy_mm\":" + String(g_live_disp_mm[1], 2) + ",";
+    s += "\"dz_mm\":" + String(g_live_disp_mm[2], 2) + ",";
+    s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 2);
     s += "}";
     server.send(200, "application/json", s);
     return;
@@ -1931,9 +1956,9 @@ void handleApiLive()
     }
   }
 
-  Wire.setClock(400000);
+  Wire.setClock(1000000);
   LIS2DW12 lis(Wire, 0x18);
-  if (!lis.begin(-1, -1, 400000))
+  if (!lis.begin(-1, -1, 1000000))
   {
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
@@ -1949,26 +1974,103 @@ void handleApiLive()
   cfg.bdu = true;
   cfg.autoInc = true;
   lis.applyConfig(cfg);
-  lis.setRateHz(100);
+  lis.setRateHz(LIVE_PREVIEW_HZ);
 
   lis.loadCalibrationNVS("lis2dw12", "cal");
   g_calDirty = false;
 
-  float g[3] = {0, 0, 0};
-  lis.readG(g);
+  auto cal = lis.getCalibration();
+  const uint8_t resBits = lis.activeResolutionBits();
+  const uint8_t fs_g = fsToByte(cfg.fs);
 
-  g_live_g[0] = g[0];
-  g_live_g[1] = g[1];
-  g_live_g[2] = g[2];
+  const uint16_t samples = LIVE_PREVIEW_HZ;
+  const float dt = 1.0f / (float)LIVE_PREVIEW_HZ;
+  double sumAcc[3] = {0, 0, 0};
+  float vel[3] = {0, 0, 0};
+  float disp[3] = {0, 0, 0};
+  uint16_t valid = 0;
+
+  for (uint16_t i = 0; i < samples; i++)
+  {
+    int16_t axRaw, ayRaw, azRaw;
+    if (!lis.readRawAligned(axRaw, ayRaw, azRaw))
+    {
+      delayMicroseconds(1200);
+      continue;
+    }
+
+    float gx = rawAlignedToG(axRaw, resBits, fs_g);
+    float gy = rawAlignedToG(ayRaw, resBits, fs_g);
+    float gz = rawAlignedToG(azRaw, resBits, fs_g);
+
+    gx = applyCal1(gx, cal.offset_g[0], cal.scale[0]);
+    gy = applyCal1(gy, cal.offset_g[1], cal.scale[1]);
+    gz = applyCal1(gz, cal.offset_g[2], cal.scale[2]);
+
+    float ax = gx * GRAVITY_MPS2;
+    float ay = gy * GRAVITY_MPS2;
+    float az = gz * GRAVITY_MPS2;
+
+    sumAcc[0] += ax;
+    sumAcc[1] += ay;
+    sumAcc[2] += az;
+
+    vel[0] += ax * dt;
+    vel[1] += ay * dt;
+    vel[2] += az * dt;
+
+    disp[0] += vel[0] * dt;
+    disp[1] += vel[1] * dt;
+    disp[2] += vel[2] * dt;
+
+    valid++;
+    delayMicroseconds(1200); // attempt to stay close to sensor ODR
+  }
 
   if (g_i2cMutex)
     xSemaphoreGive(g_i2cMutex);
 
+  if (!valid)
+  {
+    g_liveLastMs = 0;
+    server.send(200, "application/json", "{\"enabled\":false}");
+    return;
+  }
+
+  const float invN = 1.0f / (float)valid;
+  for (int i = 0; i < 3; i++)
+  {
+    g_live_acc_mps2[i] = (float)(sumAcc[i] * invN);
+    g_live_vel_mmps[i] = vel[i] * 1000.0f;
+    g_live_disp_mm[i] = disp[i] * 1000.0f;
+    g_live_g[i] = g_live_acc_mps2[i] / GRAVITY_MPS2;
+  }
+
+  g_live_mag_acc = sqrtf(g_live_acc_mps2[0] * g_live_acc_mps2[0] +
+                         g_live_acc_mps2[1] * g_live_acc_mps2[1] +
+                         g_live_acc_mps2[2] * g_live_acc_mps2[2]);
+  g_live_mag_vel_mmps = sqrtf(g_live_vel_mmps[0] * g_live_vel_mmps[0] +
+                              g_live_vel_mmps[1] * g_live_vel_mmps[1] +
+                              g_live_vel_mmps[2] * g_live_vel_mmps[2]);
+  g_live_mag_disp_mm = sqrtf(g_live_disp_mm[0] * g_live_disp_mm[0] +
+                             g_live_disp_mm[1] * g_live_disp_mm[1] +
+                             g_live_disp_mm[2] * g_live_disp_mm[2]);
+
   String s = "{";
   s += "\"enabled\":true,";
-  s += "\"ax\":" + String(g[0], 3) + ",";
-  s += "\"ay\":" + String(g[1], 3) + ",";
-  s += "\"az\":" + String(g[2], 3);
+  s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+  s += "\"ax\":" + String(g_live_acc_mps2[0], 3) + ",";
+  s += "\"ay\":" + String(g_live_acc_mps2[1], 3) + ",";
+  s += "\"az\":" + String(g_live_acc_mps2[2], 3) + ",";
+  s += "\"mag\":" + String(g_live_mag_acc, 3) + ",";
+  s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 2) + ",";
+  s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 2) + ",";
+  s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 2) + ",";
+  s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 2) + ",";
+  s += "\"dx_mm\":" + String(g_live_disp_mm[0], 2) + ",";
+  s += "\"dy_mm\":" + String(g_live_disp_mm[1], 2) + ",";
+  s += "\"dz_mm\":" + String(g_live_disp_mm[2], 2) + ",";
+  s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 2);
   s += "}";
   server.send(200, "application/json", s);
 }

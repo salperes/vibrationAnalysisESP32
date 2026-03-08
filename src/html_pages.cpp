@@ -416,6 +416,7 @@ function drawChart(){
 
 async function getJson(path){
   const r = await fetch(path, {cache:"no-store"});
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return await r.json();
 }
 async function getText(path){
@@ -430,12 +431,15 @@ async function postText(path, params){
   return {ok:r.ok, text:t};
 }
 function esc(s){ return encodeURIComponent(s); }
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+let _toastTimer = null;
 function toast(msg){
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(()=>t.classList.remove("show"), 2600);
+  if(_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(()=>{ t.classList.remove("show"); _toastTimer=null; }, 2600);
 }
 
 function tsYYMMDDHHMMSS(){
@@ -465,58 +469,74 @@ function prettyName(filePath){
 }
 
 let lastRecording = null;
+let _inFlight = {info:false, files:false, fs:false, live:false};
 
 async function refreshFiles(selectName=""){
-  const files = await getJson("/api/list");
-  const sel = document.getElementById("fileSel");
-  const current = selectName || sel.value;
+  if(_inFlight.files) return;
+  _inFlight.files = true;
+  try{
+    const files = await getJson("/api/list");
+    const sel = document.getElementById("fileSel");
+    const current = selectName || sel.value;
 
-  sel.innerHTML = "";
-  let keep = "";
-  files.sort((a,b)=> (b.name.localeCompare(a.name)));
+    sel.innerHTML = "";
+    let keep = "";
+    files.sort((a,b)=> (b.name.localeCompare(a.name)));
 
-  for(const f of files){
-    const opt = document.createElement("option");
-    opt.value = f.name;
-    opt.textContent = `${prettyName(f.name)}  (${f.size} B)`;
-    sel.appendChild(opt);
-    if (f.name === current) keep = current;
-  }
-  if (keep) sel.value = keep;
+    for(const f of files){
+      const opt = document.createElement("option");
+      opt.value = f.name;
+      opt.textContent = `${prettyName(f.name)}  (${f.size} B)`;
+      sel.appendChild(opt);
+      if (f.name === current) keep = current;
+    }
+    if (keep) sel.value = keep;
+  }catch(e){ console.warn("refreshFiles:", e); }
+  finally{ _inFlight.files = false; }
 }
 
 async function refreshFsInfo(){
-  const j = await getJson("/api/fsinfo");
-  const el = document.getElementById("fsinfo");
-  const fmt = (x)=> x < 1024*1024 ? (x/1024).toFixed(1)+" KB" : (x/1024/1024).toFixed(2)+" MB";
-  el.textContent = `FS: used ${fmt(j.used)} / total ${fmt(j.total)} (free ${fmt(j.free)})`;
+  if(_inFlight.fs) return;
+  _inFlight.fs = true;
+  try{
+    const j = await getJson("/api/fsinfo");
+    const el = document.getElementById("fsinfo");
+    const fmt = (x)=> x < 1024*1024 ? (x/1024).toFixed(1)+" KB" : (x/1024/1024).toFixed(2)+" MB";
+    el.textContent = `FS: used ${fmt(j.used)} / total ${fmt(j.total)} (free ${fmt(j.free)})`;
+  }catch(e){ console.warn("refreshFsInfo:", e); }
+  finally{ _inFlight.fs = false; }
 }
 
 async function refreshInfo(){
-  const j = await getJson("/api/info");
-  const st = document.getElementById("status");
+  if(_inFlight.info) return;
+  _inFlight.info = true;
+  try{
+    const j = await getJson("/api/info");
+    const st = document.getElementById("status");
 
-  let flags = [];
-  if (j.calibratingStatic) flags.push("CAL(STATIC)");
-  if (j.calibrating6) flags.push("CAL(6POS:"+j.calibPose+")");
+    let flags = [];
+    if (j.calibratingStatic) flags.push("CAL(STATIC)");
+    if (j.calibrating6) flags.push("CAL(6POS:" + escHtml(j.calibPose) + ")");
 
-  st.innerHTML =
-    (j.recording ? "<span class='warn'>RECORDING</span>" : "<span class='ok'>IDLE</span>")
-    + " | mode: " + (j.mode || "-")
-    + " | currentFile: " + (j.currentFile || "-")
-    + " | samples: " + j.samples
-    + " | elapsed: " + Math.round(j.elapsedMs/1000) + " s"
-    + " | maxBacklog: " + j.maxBacklog
-    + (flags.length ? (" | <span class='warn'>" + flags.join(" ") + "</span>") : "");
+    st.innerHTML =
+      (j.recording ? "<span class='warn'>RECORDING</span>" : "<span class='ok'>IDLE</span>")
+      + " | mode: " + escHtml(j.mode || "-")
+      + " | currentFile: " + escHtml(j.currentFile || "-")
+      + " | samples: " + j.samples
+      + " | elapsed: " + Math.round(j.elapsedMs/1000) + " s"
+      + " | maxBacklog: " + j.maxBacklog
+      + (flags.length ? (" | <span class='warn'>" + flags.join(" ") + "</span>") : "");
 
-  document.getElementById("info").textContent = JSON.stringify(j, null, 2);
+    document.getElementById("info").textContent = JSON.stringify(j, null, 2);
 
-  if (lastRecording === true && j.recording === false) {
-    toast(`DONE: ${j.currentFile}  samples=${j.samples}`);
-    await refreshFiles(j.currentFile);
-    await refreshFsInfo();
-  }
-  lastRecording = j.recording;
+    if (lastRecording === true && j.recording === false) {
+      toast(`DONE: ${j.currentFile}  samples=${j.samples}`);
+      await refreshFiles(j.currentFile);
+      await refreshFsInfo();
+    }
+    lastRecording = j.recording;
+  }catch(e){ console.warn("refreshInfo:", e); }
+  finally{ _inFlight.info = false; }
 }
 
 function setMaskBits() {
@@ -542,8 +562,11 @@ async function toggleRealtime(on) {
 }
 
 async function refreshLive() {
+  if(_inFlight.live) return;
+  _inFlight.live = true;
+  try{
   const j = await getJson("/api/live");
-  if (j.enabled === false) return;
+  if (j.enabled === false) { _inFlight.live=false; return; }
   if (j.realtime) {
     realtimeMode = true;
     document.getElementById("chkRealtime").checked = true;
@@ -577,6 +600,8 @@ async function refreshLive() {
   const gz = j.az / GRAVITY;
   pushSample(gx, gy, gz);
   drawChart();
+  }catch(e){ console.warn("refreshLive:", e); }
+  finally{ _inFlight.live = false; }
 }
 
 async function startRec(){
@@ -664,16 +689,22 @@ async function runFFT(){
   const axis = document.getElementById("fftAxis").value;
   if(!file) return alert("Select file");
 
-  const j = await getJson(`/api/fft?file=${esc(file)}&axis=${axis}`);
-  drawFFT(j.fft, j.df);
-  document.getElementById("fftInfo").textContent =
-    `Axis: ${j.axis}\nPeak: ${j.peak_hz.toFixed(2)} Hz\nMagnitude: ${j.peak_mag.toFixed(4)}`;
+  try{
+    const j = await getJson(`/api/fft?file=${esc(file)}&axis=${axis}`);
+    drawFFT(j.fft, j.df);
+    document.getElementById("fftInfo").textContent =
+      `Axis: ${j.axis}\nPeak: ${j.peak_hz.toFixed(2)} Hz\nMagnitude: ${j.peak_mag.toFixed(4)}`;
+  }catch(e){
+    console.error(e);
+    alert("FFT failed: " + (e?.message || e));
+  }
 }
 
 function drawFFT(arr, df){
     const c = document.getElementById("fftChart");
     const ctx = c.getContext("2d");
     ctx.clearRect(0,0,c.width,c.height);
+    if(!arr || arr.length < 2 || !df) return;
 
     const w=c.width,h=c.height;
     const mL=50,mR=10,mT=10,mB=30;
@@ -687,8 +718,9 @@ function drawFFT(arr, df){
 
     ctx.beginPath();
     ctx.strokeStyle="#36c";
+    const div = Math.max(1, arr.length-1);
     for(let i=0;i<arr.length;i++){
-        const x=mL+(i/(arr.length-1))*pw;
+        const x=mL+(i/div)*pw;
         const y=mT+(1-arr[i]/max)*ph;
         if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     }

@@ -200,7 +200,7 @@ void handleDownloadCSV()
 
   server.sendContent(hdr);
 
-  const uint32_t dt_ms = (h.rate_hz > 0) ? (1000UL / h.rate_hz) : 0;
+  const uint32_t dt_ms = (h.rate_hz > 0) ? (1000UL / h.rate_hz) : 1;
   uint32_t t_ms = 0;
 
   char line[96];

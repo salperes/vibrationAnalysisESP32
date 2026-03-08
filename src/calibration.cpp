@@ -131,9 +131,11 @@ void handleApiCalibrateStatic()
     server.send(409, "text/plain", "Busy");
     return;
   }
+  g_calibratingStatic = true; // set before task creation to prevent TOCTOU race
   BaseType_t ok = xTaskCreatePinnedToCore(calibrateStaticTask, "calS", 4096, nullptr, 2, nullptr, 1);
   if (ok != pdPASS)
   {
+    g_calibratingStatic = false;
     server.send(500, "text/plain", "Task create failed");
     return;
   }
@@ -147,9 +149,11 @@ void handleApiCalibrate6()
     server.send(409, "text/plain", "Busy");
     return;
   }
+  g_calibrating6 = true; // set before task creation to prevent TOCTOU race
   BaseType_t ok = xTaskCreatePinnedToCore(calibrate6PosTask, "cal6", 6144, nullptr, 2, nullptr, 1);
   if (ok != pdPASS)
   {
+    g_calibrating6 = false;
     server.send(500, "text/plain", "Task create failed");
     return;
   }

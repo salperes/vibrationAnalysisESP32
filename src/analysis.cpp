@@ -245,6 +245,12 @@ void handleApiFFT()
   f.read((uint8_t *)&h, sizeof(h));
 
   uint32_t maxSamples = min((uint32_t)FFT_N, h.samples);
+  // Round down to nearest power of 2 (arduinoFFT requires it)
+  {
+    uint32_t p2 = 1;
+    while (p2 * 2 <= maxSamples) p2 *= 2;
+    maxSamples = p2;
+  }
   if (maxSamples < 16)
   {
     f.close();

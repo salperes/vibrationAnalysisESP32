@@ -306,9 +306,11 @@ void handleApiStart()
   g_uiTimestamp = ts;
 
   g_stopRequested = false;
+  g_recording = true; // set before task creation to prevent TOCTOU race
   BaseType_t ok = xTaskCreatePinnedToCore(recordTask, "rec", 8192, nullptr, 2, &g_recTask, 1);
   if (ok != pdPASS)
   {
+    g_recording = false;
     server.send(500, "text/plain", "Task create failed");
     return;
   }

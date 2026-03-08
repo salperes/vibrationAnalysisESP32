@@ -423,6 +423,12 @@ async function getText(path){
   const t = await r.text();
   return {ok:r.ok, text:t};
 }
+async function postText(path, params){
+  const body = params ? Object.entries(params).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&') : '';
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, cache:'no-store'});
+  const t = await r.text();
+  return {ok:r.ok, text:t};
+}
 function esc(s){ return encodeURIComponent(s); }
 
 function toast(msg){
@@ -516,11 +522,11 @@ async function refreshInfo(){
 function setMaskBits() {
   const bits = document.getElementById("maskBits").value;
   maskBits = parseInt(bits, 10) || 0;
-  getText(`/api/rawmask?bits=${bits}`);
+  postText('/api/rawmask', {bits});
 }
 
 async function toggleRealtime(on) {
-  const r = await getText(`/api/realtime?enable=${on ? 1 : 0}&mask=${maskBits}`);
+  const r = await postText('/api/realtime', {enable: on ? 1 : 0, mask: maskBits});
   if (!r.ok) {
     alert(r.text);
     document.getElementById("chkRealtime").checked = !on;
@@ -579,7 +585,7 @@ async function startRec(){
   const sec = document.getElementById("sec").value;
   const ts = tsYYMMDDHHMMSS();
 
-  const r = await getText(`/api/start?hz=${esc(hz)}&fs=${esc(fs)}&sec=${esc(sec)}&ts=${esc(ts)}`);
+  const r = await postText('/api/start', {hz, fs, sec, ts});
   if(!r.ok) alert(r.text);
   else toast("STARTED");
 
@@ -589,7 +595,7 @@ async function startRec(){
 }
 
 async function stopRec(){
-  const r = await getText("/api/stop");
+  const r = await postText('/api/stop');
   if(!r.ok) alert(r.text);
   else toast("STOP requested");
 
@@ -611,7 +617,7 @@ function downloadCsv(){
 async function deleteSel(){
   const sel = document.getElementById("fileSel").value;
   if(!sel){ alert("No file selected"); return; }
-  const r = await getText(`/api/delete?file=${esc(sel)}`);
+  const r = await postText('/api/delete', {file: sel});
   if(!r.ok) alert(r.text);
   else toast(`Deleted: ${sel}`);
 
@@ -621,7 +627,7 @@ async function deleteSel(){
 
 async function calibrateStatic(){
   if(!confirm("STATIC CALIBRATION\nDevice still, +Z UP.\nStart?")) return;
-  const r = await getText("/api/calibrate_static");
+  const r = await postText('/api/calibrate_static');
   if(!r.ok) alert(r.text);
   else toast("Static calibration started");
 }
@@ -633,7 +639,7 @@ Follow steps: X+, X-, Y+, Y-, Z+, Z-
 Keep device still at each step.
 (You can watch calibPose in Info)`
   );
-  const r = await getText("/api/calibrate6");
+  const r = await postText('/api/calibrate6');
   if(!r.ok) alert(r.text);
   else toast("6-POS calibration started");
 }
@@ -646,7 +652,7 @@ function goUpdate(){
 async function doReset(){
   if(!confirm("Device will reboot now.\nContinue?")) return;
   toast("Rebooting...");
-  await getText("/api/reset");
+  await postText('/api/reset');
   // page will drop; user refresh after reconnect
 }
 

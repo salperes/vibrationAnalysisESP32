@@ -59,6 +59,10 @@ void stopTimer()
   timer0 = nullptr;
 }
 
+// Cached live-preview sensor (avoids reinit on every /api/live request)
+static LIS2DW12 g_liveSensor(Wire, 0x18);
+static bool g_liveSensorReady = false;
+
 // State lives in app_state.cpp
 static void resetLivePreviewState()
 {
@@ -92,6 +96,23 @@ static bool isSafeAccelFile(String p)
 }
 
 static bool fileExists(const String &path) { return LittleFS.exists(path); }
+
+static String jsonEscape(const String &s)
+{
+  String out;
+  out.reserve(s.length() + 4);
+  for (unsigned i = 0; i < s.length(); i++)
+  {
+    char c = s[i];
+    if (c == '"')
+      out += "\\\"";
+    else if (c == '\\')
+      out += "\\\\";
+    else
+      out += c;
+  }
+  return out;
+}
 
 static bool isValidYYMMDDHHMMSS(const String &ts)
 {
@@ -261,7 +282,7 @@ static String buildFilesJsonNow()
         out += ",";
       first = false;
       out += "{";
-      out += "\"name\":\"" + name + "\",";
+      out += "\"name\":\"" + jsonEscape(name) + "\",";
       out += "\"size\":" + String((uint32_t)f.size());
       out += "}";
     }
@@ -321,6 +342,7 @@ static String fsInfoJson()
 // ======================= Recording task =======================
 static void recordTask(void * /*arg*/)
 {
+  g_liveSensorReady = false; // sensor will be reconfigured by this task
   g_recording = true;
   g_stopRequested = false;
   g_samplesWritten = 0;
@@ -332,12 +354,22 @@ static void recordTask(void * /*arg*/)
   g_currentFile = path;
 
   if (g_i2cMutex)
-    xSemaphoreTake(g_i2cMutex, portMAX_DELAY);
+  {
+    if (xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(5000)) != pdTRUE)
+    {
+      Serial.println("[REC] I2C mutex timeout");
+      g_recording = false;
+      g_recTask = nullptr;
+      vTaskDelete(nullptr);
+      return;
+    }
+  }
 
   Wire.setClock(1000000);
   LIS2DW12 lis(Wire, 0x18);
   if (!lis.begin(-1, -1, 1000000))
   {
+    Serial.println("[REC] Sensor init failed");
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
     g_recording = false;
@@ -417,7 +449,6 @@ static void recordTask(void * /*arg*/)
     vTaskDelete(nullptr);
     return;
   }
-  f.close();
 
   const uint32_t targetN = (uint32_t)g_cfg.hz * (uint32_t)g_cfg.sec;
   const size_t CHUNK_N = 1024;
@@ -470,12 +501,8 @@ static void recordTask(void * /*arg*/)
 
       if (fill)
       {
-        File wf = LittleFS.open(path, "a");
-        if (!wf)
-          break;
         size_t bytes = fill * sizeof(Sample6);
-        size_t wrote = wf.write((uint8_t *)chunk, bytes);
-        wf.close();
+        size_t wrote = f.write((uint8_t *)chunk, bytes);
         if (wrote != bytes)
           break;
         g_samplesWritten = idx;
@@ -486,6 +513,7 @@ static void recordTask(void * /*arg*/)
     delay(0);
   }
 
+  f.close();
   stopTimer();
   free(chunk);
 
@@ -508,10 +536,19 @@ static void recordTask(void * /*arg*/)
 // ======================= Calibration tasks =======================
 static void calibrateStaticTask(void * /*arg*/)
 {
+  g_liveSensorReady = false;
   g_calibratingStatic = true;
 
   if (g_i2cMutex)
-    xSemaphoreTake(g_i2cMutex, portMAX_DELAY);
+  {
+    if (xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(5000)) != pdTRUE)
+    {
+      Serial.println("[CAL] I2C mutex timeout");
+      g_calibratingStatic = false;
+      vTaskDelete(nullptr);
+      return;
+    }
+  }
 
   Wire.setClock(400000);
   LIS2DW12 lis(Wire, 0x18);
@@ -545,11 +582,20 @@ static void calibrateStaticTask(void * /*arg*/)
 
 static void calibrate6PosTask(void * /*arg*/)
 {
+  g_liveSensorReady = false;
   g_calibrating6 = true;
   g_calibStep = 0;
 
   if (g_i2cMutex)
-    xSemaphoreTake(g_i2cMutex, portMAX_DELAY);
+  {
+    if (xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(5000)) != pdTRUE)
+    {
+      Serial.println("[CAL6] I2C mutex timeout");
+      g_calibrating6 = false;
+      vTaskDelete(nullptr);
+      return;
+    }
+  }
 
   Wire.setClock(400000);
   LIS2DW12 lis(Wire, 0x18);
@@ -934,7 +980,7 @@ void handleApiAnalyze()
       cnt[b]++;
 
     i++;
-    if ((i & 0x3FF) == 0)
+    if ((i & 0xFF) == 0)
       delay(0); // watchdog friendly
   }
   f.close();
@@ -954,7 +1000,7 @@ void handleApiAnalyze()
   String head;
   head.reserve(1024);
   head += "{";
-  head += "\"file\":\"" + path + "\",";
+  head += "\"file\":\"" + jsonEscape(path) + "\",";
   head += "\"rate_hz\":" + String(h.rate_hz) + ",";
   head += "\"record_s\":" + String(h.record_s) + ",";
   head += "\"samples_header\":" + String(h.samples) + ",";
@@ -977,10 +1023,12 @@ void handleApiAnalyze()
   {
     String chunk;
     chunk.reserve(2048);
+    char buf[16];
     for (uint32_t k = 0; k < pts; k++)
     {
       float v = (c[k] ? (sum[k] / (float)c[k]) : 0.0f);
-      chunk += String(v, 6);
+      snprintf(buf, sizeof(buf), "%.6f", v);
+      chunk += buf;
       if (k + 1 < pts)
         chunk += ",";
       if (chunk.length() > 1800)
@@ -1164,7 +1212,13 @@ void handleApiRealtimeConfig()
   }
 
   if (g_i2cMutex)
-    xSemaphoreTake(g_i2cMutex, portMAX_DELAY);
+  {
+    if (xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(5000)) != pdTRUE)
+    {
+      server.send(500, "text/plain", "I2C mutex timeout");
+      return;
+    }
+  }
 
   Wire.setClock(1000000);
   LIS2DW12 lis(Wire, 0x18);
@@ -1240,31 +1294,34 @@ void handleApiLive()
   }
 
   Wire.setClock(1000000);
-  LIS2DW12 lis(Wire, 0x18);
-  if (!lis.begin(-1, -1, 1000000))
+
+  if (!g_liveSensorReady || g_calDirty)
   {
-    if (g_i2cMutex)
-      xSemaphoreGive(g_i2cMutex);
-    server.send(200, "application/json", "{\"enabled\":false}");
-    return;
+    if (!g_liveSensor.begin(-1, -1, 1000000))
+    {
+      if (g_i2cMutex)
+        xSemaphoreGive(g_i2cMutex);
+      server.send(200, "application/json", "{\"enabled\":false}");
+      return;
+    }
+
+    LIS2DW12::Config cfg;
+    cfg.mode = LIS2DW12::Mode::HighPerf;
+    cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
+    cfg.fs = LIS2DW12::FullScale::G2;
+    cfg.lowNoise = true;
+    cfg.bdu = true;
+    cfg.autoInc = true;
+    g_liveSensor.applyConfig(cfg);
+    g_liveSensor.setRateHz(LIVE_PREVIEW_HZ);
+    g_liveSensor.loadCalibrationNVS("lis2dw12", "cal");
+    g_calDirty = false;
+    g_liveSensorReady = true;
   }
 
-  LIS2DW12::Config cfg;
-  cfg.mode = LIS2DW12::Mode::HighPerf;
-  cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
-  cfg.fs = LIS2DW12::FullScale::G2;
-  cfg.lowNoise = true;
-  cfg.bdu = true;
-  cfg.autoInc = true;
-  lis.applyConfig(cfg);
-  lis.setRateHz(LIVE_PREVIEW_HZ);
-
-  lis.loadCalibrationNVS("lis2dw12", "cal");
-  g_calDirty = false;
-
-  auto cal = lis.getCalibration();
-  const uint8_t resBits = lis.activeResolutionBits();
-  const uint8_t fs_g = fsToByte(cfg.fs);
+  auto cal = g_liveSensor.getCalibration();
+  const uint8_t resBits = g_liveSensor.activeResolutionBits();
+  const uint8_t fs_g = fsToByte(LIS2DW12::FullScale::G2);
 
   float cutoff = g_live_lp_cut_hz;
   if (server.hasArg("fc"))
@@ -1277,7 +1334,7 @@ void handleApiLive()
   // remember last used cutoff
   g_live_lp_cut_hz = cutoff;
 
-  const uint16_t samples = LIVE_PREVIEW_HZ;
+  const uint16_t samples = min((uint16_t)200, LIVE_PREVIEW_HZ);
   const float dt = 1.0f / (float)LIVE_PREVIEW_HZ;
   const float tau = 1.0f / (2.0f * PI * cutoff);
   const float alpha = dt / (tau + dt); // 1st-order LPF coefficient
@@ -1294,7 +1351,7 @@ void handleApiLive()
     for (uint16_t i = 0; i < samples; i++)
     {
       int16_t axRaw, ayRaw, azRaw;
-      if (!lis.readRawAligned(axRaw, ayRaw, azRaw))
+      if (!g_liveSensor.readRawAligned(axRaw, ayRaw, azRaw))
       {
         delayMicroseconds(1200);
         continue;
@@ -1347,7 +1404,7 @@ void handleApiLive()
       disp[2] += vel[2] * dt;
 
       valid++;
-      delayMicroseconds(1200); // attempt to stay close to sensor ODR
+      delayMicroseconds(1200);
     }
 
     if (g_i2cMutex)
@@ -1411,7 +1468,7 @@ void handleApiLive()
   for (uint16_t i = 0; i < samples; i++)
   {
     int16_t axRaw, ayRaw, azRaw;
-    if (!lis.readRawAligned(axRaw, ayRaw, azRaw))
+    if (!g_liveSensor.readRawAligned(axRaw, ayRaw, azRaw))
     {
       delayMicroseconds(1200);
       continue;
@@ -1437,7 +1494,7 @@ void handleApiLive()
     float ay = gy * GRAVITY_MPS2;
     float az = gz * GRAVITY_MPS2;
 
-    float accMag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - GRAVITY_MPS2); // remove gravity DC
+    float accMag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - GRAVITY_MPS2);
     accMag = max(0.0f, accMag - g_rt_noise_mps2);
 
     velMag += accMag * dt;
@@ -1637,7 +1694,13 @@ void handleApiFFT()
     return;
   }
 
-  char axis = server.arg("axis")[0]; // x y z
+  String axisArg = server.arg("axis");
+  if (axisArg.length() == 0)
+  {
+    server.send(400, "text/plain", "Bad axis");
+    return;
+  }
+  char axis = axisArg[0];
   int axisIdx = (axis == 'x') ? 0 : (axis == 'y') ? 1
                                 : (axis == 'z')   ? 2
                                                   : -1;
@@ -1659,10 +1722,16 @@ void handleApiFFT()
     return;
   }
 
-  static double vReal[FFT_N];
-  static double vImag[FFT_N];
-
-  memset(vImag, 0, sizeof(vImag));
+  double *vReal = (double *)malloc(FFT_N * sizeof(double));
+  double *vImag = (double *)calloc(FFT_N, sizeof(double));
+  if (!vReal || !vImag)
+  {
+    free(vReal);
+    free(vImag);
+    f.close();
+    server.send(500, "text/plain", "OOM");
+    return;
+  }
 
   Sample6 s;
   for (uint32_t i = 0; i < maxSamples; i++)
@@ -1728,6 +1797,9 @@ void handleApiFFT()
   server.sendContent("\"peak_mag\":");
   server.sendContent(String(peakMag, 6));
   server.sendContent("}");
+
+  free(vReal);
+  free(vImag);
 }
 
 // ======================= Route registration =======================
@@ -1740,19 +1812,19 @@ void registerRoutes()
   server.on("/api/list", handleApiList);
   server.on("/api/fsinfo", handleApiFsInfo);
 
-  server.on("/api/start", handleApiStart);
-  server.on("/api/stop", handleApiStop);
+  server.on("/api/start", HTTP_POST, handleApiStart);
+  server.on("/api/stop", HTTP_POST, handleApiStop);
 
   server.on("/download", handleDownload);
   server.on("/download_csv", handleDownloadCSV);
-  server.on("/api/delete", handleApiDelete);
+  server.on("/api/delete", HTTP_POST, handleApiDelete);
 
-  server.on("/api/calibrate_static", handleApiCalibrateStatic);
-  server.on("/api/calibrate6", handleApiCalibrate6);
+  server.on("/api/calibrate_static", HTTP_POST, handleApiCalibrateStatic);
+  server.on("/api/calibrate6", HTTP_POST, handleApiCalibrate6);
 
   server.on("/api/live", handleApiLive);
-  server.on("/api/realtime", handleApiRealtimeConfig);
-  server.on("/api/rawmask", [](void) {
+  server.on("/api/realtime", HTTP_POST, handleApiRealtimeConfig);
+  server.on("/api/rawmask", HTTP_POST, [](void) {
     if (server.hasArg("bits"))
     {
       uint8_t bits = (uint8_t)server.arg("bits").toInt();
@@ -1765,7 +1837,7 @@ void registerRoutes()
     }
   });
 
-  server.on("/api/reset", handleApiReset);
+  server.on("/api/reset", HTTP_POST, handleApiReset);
   server.on("/update", HTTP_GET, handleUpdateGet);
   server.on("/update", HTTP_POST, handleUpdatePost, handleUpdateUpload);
 
@@ -1840,11 +1912,9 @@ void handleDownloadCSV()
   hdr += "# fs_g=" + String(h.fs_g) + "\n";
   hdr += "# res_bits=" + String(h.res_bits) + "\n";
   hdr += "# q_bits=" + String(h.q_bits) + "\n";
-  hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
-  hdr += "# fs_g=" + String(h.fs_g) + "\n";
-  hdr += "# res_bits=" + String(h.res_bits) + "\n";
   hdr += "# cal_offset_g=" + String(h.cal_offset_g[0], 6) + "," + String(h.cal_offset_g[1], 6) + "," + String(h.cal_offset_g[2], 6) + "\n";
   hdr += "# cal_scale=" + String(h.cal_scale[0], 6) + "," + String(h.cal_scale[1], 6) + "," + String(h.cal_scale[2], 6) + "\n";
+  hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
 
   server.sendContent(hdr);
 

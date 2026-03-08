@@ -43,7 +43,7 @@ String g_apSsid = "";
 
 String g_listCache = "[]";
 uint32_t g_listCacheMs = 0;
-const uint32_t LIST_CACHE_TTL_MS = 2000;
+const uint32_t LIST_CACHE_TTL_MS = 5000;
 
 bool g_realtimeEnabled = false;
 float g_rt_noise_mps2 = 0;

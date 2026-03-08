@@ -4,6 +4,7 @@
 #include <WiFi.h>
 
 #include "api_handlers.h"
+#include "file_handlers.h"
 #include "app_state.h"
 #include "config.h"
 

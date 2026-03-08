@@ -158,5 +158,6 @@ private:
   bool readG_uncal(float& gx, float& gy, float& gz);
   int16_t quantizeAlignedRaw(int16_t alignedRaw, uint8_t fromBits, uint8_t toBits) const;
 
+public:
   static Odr odrFromHz(uint16_t hz);
 };

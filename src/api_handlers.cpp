@@ -381,6 +381,7 @@ static void recordTask(void * /*arg*/)
                    ? LIS2DW12::LowPowerMode::LP1_12bit
                    : LIS2DW12::LowPowerMode::LP2_14bit;
   cfg.fs = fsFromG(g_cfg.fs_g);
+  cfg.odr = LIS2DW12::odrFromHz(g_cfg.hz);
   cfg.lowNoise = true;
   cfg.bdu = true;
   cfg.autoInc = true;
@@ -1196,14 +1197,31 @@ void handleApiLive()
 
   const uint16_t samples = LIVE_PREVIEW_HZ;
   const float dt = 1.0f / (float)LIVE_PREVIEW_HZ;
-  const float tau = 1.0f / (2.0f * PI * cutoff);
-  const float alpha = dt / (tau + dt); // 1st-order LPF coefficient
+
+  // Low-pass filter for anti-aliasing / noise reduction
+  const float tau_lp = 1.0f / (2.0f * M_PI * cutoff);
+  const float alpha_lp = dt / (tau_lp + dt);
+
+  // High-pass filter to remove gravity (DC) before integration
+  // fc_hp = 1 Hz removes gravity drift while preserving vibration
+  const float fc_hp = 1.0f;
+  const float tau_hp = 1.0f / (2.0f * M_PI * fc_hp);
+  const float alpha_hp = tau_hp / (tau_hp + dt);
+
+  // Second high-pass on velocity to prevent drift
+  const float fc_hp_vel = 0.5f;
+  const float tau_hp_vel = 1.0f / (2.0f * M_PI * fc_hp_vel);
+  const float alpha_hp_vel = tau_hp_vel / (tau_hp_vel + dt);
 
   double sumAcc[3] = {0, 0, 0};
   float vel[3] = {0, 0, 0};
   float disp[3] = {0, 0, 0};
   float lpf[3] = {0, 0, 0};
-  bool lpfInit = false;
+  float hp_prev_in[3] = {0, 0, 0};  // previous input for HP filter
+  float hp_out[3] = {0, 0, 0};       // HP filter output (AC acceleration)
+  float hp_vel_prev[3] = {0, 0, 0};  // previous velocity for HP filter
+  float hp_vel_out[3] = {0, 0, 0};   // HP filtered velocity
+  bool filterInit = false;
   uint16_t valid = 0;
 
   for (uint16_t i = 0; i < samples; i++)
@@ -1223,38 +1241,59 @@ void handleApiLive()
     gy = applyCal1(gy, cal.offset_g[1], cal.scale[1]);
     gz = applyCal1(gz, cal.offset_g[2], cal.scale[2]);
 
-    float ax = gx * GRAVITY_MPS2;
-    float ay = gy * GRAVITY_MPS2;
-    float az = gz * GRAVITY_MPS2;
+    float acc[3] = {gx * GRAVITY_MPS2, gy * GRAVITY_MPS2, gz * GRAVITY_MPS2};
 
-    if (!lpfInit)
+    if (!filterInit)
     {
-      lpf[0] = ax;
-      lpf[1] = ay;
-      lpf[2] = az;
-      lpfInit = true;
-    }
-    else
-    {
-      lpf[0] += alpha * (ax - lpf[0]);
-      lpf[1] += alpha * (ay - lpf[1]);
-      lpf[2] += alpha * (az - lpf[2]);
+      for (int a = 0; a < 3; a++)
+      {
+        lpf[a] = acc[a];
+        hp_prev_in[a] = acc[a];
+        hp_out[a] = 0;
+      }
+      filterInit = true;
+      valid++;
+      delayMicroseconds(1200);
+      continue;
     }
 
-    sumAcc[0] += lpf[0];
-    sumAcc[1] += lpf[1];
-    sumAcc[2] += lpf[2];
+    // Step 1: Low-pass filter (anti-alias / noise)
+    for (int a = 0; a < 3; a++)
+      lpf[a] += alpha_lp * (acc[a] - lpf[a]);
 
-    vel[0] += lpf[0] * dt;
-    vel[1] += lpf[1] * dt;
-    vel[2] += lpf[2] * dt;
+    // Step 2: High-pass filter to remove gravity (DC component)
+    // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+    for (int a = 0; a < 3; a++)
+    {
+      hp_out[a] = alpha_hp * (hp_out[a] + lpf[a] - hp_prev_in[a]);
+      hp_prev_in[a] = lpf[a];
+    }
 
-    disp[0] += vel[0] * dt;
-    disp[1] += vel[1] * dt;
-    disp[2] += vel[2] * dt;
+    // Accumulate AC acceleration (gravity removed) for RMS
+    for (int a = 0; a < 3; a++)
+      sumAcc[a] += (double)(hp_out[a] * hp_out[a]); // sum of squares for RMS
+
+    // Step 3: Integrate AC acceleration → velocity
+    float vel_old[3];
+    for (int a = 0; a < 3; a++)
+    {
+      vel_old[a] = vel[a];
+      vel[a] += hp_out[a] * dt;
+    }
+
+    // Step 4: High-pass filter velocity to remove integration drift
+    for (int a = 0; a < 3; a++)
+    {
+      hp_vel_out[a] = alpha_hp_vel * (hp_vel_out[a] + vel[a] - hp_vel_prev[a]);
+      hp_vel_prev[a] = vel[a];
+    }
+
+    // Step 5: Integrate filtered velocity → displacement (trapezoidal)
+    for (int a = 0; a < 3; a++)
+      disp[a] += hp_vel_out[a] * dt;
 
     valid++;
-    delayMicroseconds(1200); // attempt to stay close to sensor ODR
+    delayMicroseconds(1200);
   }
 
   if (g_i2cMutex)
@@ -1270,9 +1309,10 @@ void handleApiLive()
   const float invN = 1.0f / (float)valid;
   for (int i = 0; i < 3; i++)
   {
-    g_live_acc_mps2[i] = (float)(sumAcc[i] * invN);
-    g_live_vel_mmps[i] = vel[i] * 1000.0f;
-    g_live_disp_mm[i] = disp[i] * 1000.0f;
+    // sumAcc now contains sum of squares (for RMS of AC component)
+    g_live_acc_mps2[i] = sqrtf((float)(sumAcc[i] * invN)); // RMS acceleration
+    g_live_vel_mmps[i] = hp_vel_out[i] * 1000.0f;  // peak velocity (mm/s)
+    g_live_disp_mm[i] = disp[i] * 1000.0f;          // peak displacement (mm)
     g_live_g[i] = g_live_acc_mps2[i] / GRAVITY_MPS2;
   }
 
@@ -1428,6 +1468,12 @@ void handleApiFFT()
     return;
   }
 
+  if (g_recording)
+  {
+    server.send(409, "text/plain", "Recording in progress");
+    return;
+  }
+
   String path = server.arg("file");
   if (!path.startsWith("/"))
     path = "/" + path;
@@ -1448,10 +1494,29 @@ void handleApiFFT()
   }
 
   File f = LittleFS.open(path, "r");
-  FileHeaderV3 h{};
-  f.read((uint8_t *)&h, sizeof(h));
+  if (!f || f.size() < (int)sizeof(FileHeaderV3))
+  {
+    if (f)
+      f.close();
+    server.send(400, "text/plain", "Bad file");
+    return;
+  }
 
+  FileHeaderV3 h{};
+  if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h) ||
+      memcmp(h.magic, "LIS2DW12", 8) != 0)
+  {
+    f.close();
+    server.send(400, "text/plain", "Bad header");
+    return;
+  }
+
+  // Limit to actual samples available in file
+  const uint32_t maxPossible = (uint32_t)((f.size() - sizeof(FileHeaderV3)) / sizeof(Sample6));
   uint32_t maxSamples = min((uint32_t)FFT_N, h.samples);
+  if (maxSamples > maxPossible)
+    maxSamples = maxPossible;
+
   if (maxSamples < 16)
   {
     f.close();
@@ -1462,6 +1527,8 @@ void handleApiFFT()
   static double vReal[FFT_N];
   static double vImag[FFT_N];
 
+  // Zero BOTH arrays to prevent stale data from previous calls
+  memset(vReal, 0, sizeof(vReal));
   memset(vImag, 0, sizeof(vImag));
 
   Sample6 s;
@@ -1633,8 +1700,10 @@ void handleDownloadCSV()
 
   server.sendContent(hdr);
 
-  const uint32_t dt_ms = (h.rate_hz > 0) ? (1000UL / h.rate_hz) : 0;
-  uint32_t t_ms = 0;
+  // Use microseconds internally to avoid integer truncation at high sample rates
+  // e.g. 1600 Hz: dt_us=625, 800 Hz: dt_us=1250, 400 Hz: dt_us=2500
+  const uint32_t dt_us = (h.rate_hz > 0) ? (1000000UL / h.rate_hz) : 0;
+  uint64_t t_us = 0;
 
   char line[96];
   Sample6 s;
@@ -1643,12 +1712,24 @@ void handleDownloadCSV()
 
   while (f.read((uint8_t *)&s, sizeof(s)) == sizeof(s))
   {
-    int n = snprintf(line, sizeof(line), "%lu,%d,%d,%d\n",
-                     (unsigned long)t_ms, (int)s.ax, (int)s.ay, (int)s.az);
+    // Convert to milliseconds with 3 decimal places for sub-ms precision
+    uint32_t t_ms_int = (uint32_t)(t_us / 1000ULL);
+    uint16_t t_ms_frac = (uint16_t)((t_us % 1000ULL) / 1); // microsecond remainder
+    int n;
+    if (t_ms_frac == 0)
+    {
+      n = snprintf(line, sizeof(line), "%lu,%d,%d,%d\n",
+                   (unsigned long)t_ms_int, (int)s.ax, (int)s.ay, (int)s.az);
+    }
+    else
+    {
+      n = snprintf(line, sizeof(line), "%lu.%03u,%d,%d,%d\n",
+                   (unsigned long)t_ms_int, (unsigned)(t_ms_frac / 1), (int)s.ax, (int)s.ay, (int)s.az);
+    }
     if (n > 0)
       chunk += String(line);
 
-    t_ms += dt_ms;
+    t_us += dt_us;
 
     if (chunk.length() > 1800)
     {

@@ -1,61 +1,4 @@
-#include <Arduino.h>
-#include "html_pages.h"
 
-const char UPDATE_HTML[] PROGMEM = R"HTML(
-
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Firmware Update</title>
-  <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Arial;max-width:820px;margin:18px auto;padding:0 12px}
-    .card{border:1px solid #ddd;border-radius:12px;padding:14px}
-    h1{font-size:18px;margin:0 0 10px}
-    .small{font-size:12px;color:#666}
-    input,button{font-size:14px;padding:10px;border-radius:10px;border:1px solid #bbb}
-    button{cursor:pointer}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-    .bar{width:100%; height:18px}
-    .status{margin-top:10px}
-    .ok{color:#0a7} .warn{color:#c70} .bad{color:#c00}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>ESP32 Firmware Update</h1>
-
-    <div class="small">
-      Current build:
-      <span id="ver" class="mono">loading...</span>
-    </div>
-
-    <div class="small" style="margin-top:8px">
-      Select the <b>.bin</b> built for this board/partition, then upload.
-      Upload completes → device reboots.
-    </div>
-
-    <div class="row" style="margin-top:12px">
-      <input id="file" type="file" accept=".bin" required/>
-      <button id="btnUp" onclick="startUpload()">UPLOAD</button>
-      <button onclick="location.href='/'">BACK</button>
-    </div>
-
-    <div style="margin-top:12px">
-      <progress id="prog" class="bar" value="0" max="100"></progress>
-      <div id="ptext" class="small mono">0%</div>
-    </div>
-
-    <div id="msg" class="status small">Ready.</div>
-
-    <div class="small" style="margin-top:10px">
-      During upload do not power off the device.
-    </div>
-  </div>
-
-<script>
 async function loadVersion(){
   try{
     const r = await fetch('/api/version', {cache:'no-store'});
@@ -103,12 +46,12 @@ function startUpload(){
   };
 
   xhr.onload = ()=>{
-    // ESP tarafı 200 text/plain dönüyor
+    // ESP tarafÄ± 200 text/plain dÃ¶nÃ¼yor
     const txt = xhr.responseText || '';
     if(xhr.status === 200){
       setProgress(100);
       setMsg(txt + ' (page will disconnect)', 'ok');
-      // reboot sonrası bağlantı kopacak; kullanıcı manuel yeniler
+      // reboot sonrasÄ± baÄlantÄ± kopacak; kullanÄ±cÄ± manuel yeniler
     } else {
       setMsg(`Upload failed: HTTP ${xhr.status} ${txt}`, 'bad');
       document.getElementById('btnUp').disabled = false;
@@ -179,7 +122,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
       <button onclick="doReset()">RESET</button>
     </div>
     <div class="small" style="margin-top:8px">
-      Firmware update sırasında kayıt/kalibrasyon yapma.
+      Firmware update sÄ±rasÄ±nda kayÄ±t/kalibrasyon yapma.
     </div>
   </div>
 
@@ -202,10 +145,10 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 
       <label for="fs" style="margin-top:10px">G range</label>
       <select id="fs">
-        <option value="2" selected>±2 g</option>
-        <option value="4">±4 g</option>
-        <option value="8">±8 g</option>
-        <option value="16">±16 g</option>
+        <option value="2" selected>Â±2 g</option>
+        <option value="4">Â±4 g</option>
+        <option value="8">Â±8 g</option>
+        <option value="16">Â±16 g</option>
       </select>
 
       <label for="sec" style="margin-top:10px">Record time (s)</label>
@@ -221,7 +164,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
       </select>
 
       <div class="small" style="margin-top:10px">
-        Dosya adı browser saatinden alınır: accelYYMMDDHHMMSS.dat
+        Dosya adÄ± browser saatinden alÄ±nÄ±r: accelYYMMDDHHMMSS.dat
       </div>
     </div>
 
@@ -245,7 +188,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
       </div>
 
       <div class="small" style="margin-top:10px">
-        DOWNLOAD / DELETE seçili dosyaya uygulanır.
+        DOWNLOAD / DELETE seÃ§ili dosyaya uygulanÄ±r.
       </div>
     </div>
 
@@ -307,7 +250,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   <div id="toast" class="toast"></div>
 
 <script>
-// (Aşağısı senin V3 JS’in aynısı; sadece reset/update fonksiyonları eklendi.)
+// (AÅaÄÄ±sÄ± senin V3 JSâin aynÄ±sÄ±; sadece reset/update fonksiyonlarÄ± eklendi.)
 
 // ---- Mini chart (canvas) ----
 const CHART_N = 60;
@@ -513,32 +456,32 @@ async function refreshInfo(){
   lastRecording = j.recording;
 }
 
-function setMaskBits() {
-  const bits = document.getElementById("maskBits").value;
-  maskBits = parseInt(bits, 10) || 0;
+function setMaskBits(){
+  const bits = document.getElementById(\"maskBits\").value;
+  maskBits = parseInt(bits,10) || 0;
   getText(`/api/rawmask?bits=${bits}`);
 }
 
-async function toggleRealtime(on) {
+async function toggleRealtime(on){
   const r = await getText(`/api/realtime?enable=${on ? 1 : 0}&mask=${maskBits}`);
-  if (!r.ok) {
+  if(!r.ok){
     alert(r.text);
     document.getElementById("chkRealtime").checked = !on;
     return;
   }
   realtimeMode = on;
   document.getElementById("chart").style.display = on ? "none" : "";
-  if (on) {
+  if(on){
     document.getElementById("live").textContent = "Realtime mode (preview off)";
   } else {
     document.getElementById("rtStats").textContent = "-";
   }
 }
 
-async function refreshLive() {
+async function refreshLive(){
   const j = await getJson("/api/live");
-  if (j.enabled === false) return;
-  if (j.realtime) {
+  if(j.enabled === false) return;
+  if(j.realtime){
     realtimeMode = true;
     document.getElementById("chkRealtime").checked = true;
     document.getElementById("chart").style.display = "none";
@@ -546,11 +489,13 @@ async function refreshLive() {
     const a1 = j.avg1 || {};
     const a5 = j.avg5 || {};
     const a10 = j.avg10 || {};
-    const txt =
-      `1s  acc:${(a1.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a1.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a1.disp_mm || 0).toFixed(3)} mm\n` +
-      `5s  acc:${(a5.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a5.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a5.disp_mm || 0).toFixed(3)} mm\n` +
-      `10s acc:${(a10.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a10.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a10.disp_mm || 0).toFixed(3)} mm\n` +
-      `noise: ${(j.noise_mps2 || 0).toFixed(4)} m/s^2`;
+    const txt = `1s  acc:${(a1.acc_mps2||0).toFixed(3)} m/s2  vel:${(a1.vel_mmps||0).toFixed(2)} mm/s  disp:${(a1.disp_mm||0).toFixed(3)} mm
+`
+              + `5s  acc:${(a5.acc_mps2||0).toFixed(3)} m/s2  vel:${(a5.vel_mmps||0).toFixed(2)} mm/s  disp:${(a5.disp_mm||0).toFixed(3)} mm
+`
+              + `10s acc:${(a10.acc_mps2||0).toFixed(3)} m/s2  vel:${(a10.vel_mmps||0).toFixed(2)} mm/s  disp:${(a10.disp_mm||0).toFixed(3)} mm
+`
+              + `noise: ${(j.noise_mps2||0).toFixed(4)} m/s2`;
     document.getElementById("rtStats").textContent = txt;
     return;
   }
@@ -559,12 +504,14 @@ async function refreshLive() {
   document.getElementById("chkRealtime").checked = false;
   document.getElementById("chart").style.display = "";
 
-  if (typeof j.ax !== "number") return;
+  if(typeof j.ax !== "number") return;
 
-  const accLine = `ACC (m/s^2)  X:${j.ax.toFixed(3)}  Y:${j.ay.toFixed(3)}  Z:${j.az.toFixed(3)}  MAG:${j.mag.toFixed(3)}`;
+  const accLine = `ACC (m/s2)  X:${j.ax.toFixed(3)}  Y:${j.ay.toFixed(3)}  Z:${j.az.toFixed(3)}  MAG:${j.mag.toFixed(3)}`;
   const velLine = `VEL (mm/s)  X:${j.vx_mmps.toFixed(2)}  Y:${j.vy_mmps.toFixed(2)}  Z:${j.vz_mmps.toFixed(2)}  MAG:${j.vmag_mmps.toFixed(2)}`;
   const dispLine = `DISP (mm)   X:${j.dx_mm.toFixed(2)}  Y:${j.dy_mm.toFixed(2)}  Z:${j.dz_mm.toFixed(2)}  MAG:${j.dmag_mm.toFixed(2)}`;
-  document.getElementById("live").textContent = `${accLine}\n${velLine}\n${dispLine}`;
+  document.getElementById("live").textContent = `${accLine}
+${velLine}
+${dispLine}`;
 
   const gx = j.ax / GRAVITY;
   const gy = j.ay / GRAVITY;
@@ -650,8 +597,8 @@ async function doReset(){
   // page will drop; user refresh after reconnect
 }
 
-// (Analysis JS burada devam ediyor; senin V3 içeriğini aynen bırakabilirsin.)
-// Senin mevcut V3 analysis kodu bu dosyada var sayılıyor.
+// (Analysis JS burada devam ediyor; senin V3 iÃ§eriÄini aynen bÄ±rakabilirsin.)
+// Senin mevcut V3 analysis kodu bu dosyada var sayÄ±lÄ±yor.
 
 async function runFFT(){
   const file = document.getElementById("fileSel").value;
@@ -793,7 +740,7 @@ rate_hz: ${j.rate_hz}
 record_s: ${j.record_s}
 samples(header): ${j.samples_header}
 samples(used): ${j.samples_used}
-fs_g: ±${j.fs_g}g
+fs_g: Â±${j.fs_g}g
 res_bits: ${j.res_bits}
 q_bits: ${j.q_bits}
 
@@ -820,12 +767,3 @@ setInterval(refreshFsInfo, 3000);
 setInterval(refreshLive, 1000);
 
 refreshInfo(); refreshFiles(); refreshFsInfo(); refreshLive(); drawChart();
-</script>
-</body>
-</html>
-
-)HTML";
-
-
-
-

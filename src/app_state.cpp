@@ -44,3 +44,12 @@ String g_apSsid = "";
 String g_listCache = "[]";
 uint32_t g_listCacheMs = 0;
 const uint32_t LIST_CACHE_TTL_MS = 2000;
+
+bool g_realtimeEnabled = false;
+float g_rt_noise_mps2 = 0;
+float g_rt_hist_acc_mps2[10] = {0};
+float g_rt_hist_vel_mmps[10] = {0};
+float g_rt_hist_disp_mm[10] = {0};
+uint8_t g_rt_hist_count = 0;
+uint8_t g_rt_hist_idx = 0;
+uint8_t g_rawMaskBits = 3; // default 3-bit mask for RT/live

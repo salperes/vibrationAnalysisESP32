@@ -80,3 +80,15 @@ extern String g_apSsid;
 extern String g_listCache;
 extern uint32_t g_listCacheMs;
 extern const uint32_t LIST_CACHE_TTL_MS;
+
+// Realtime ISO20816 mode state
+extern bool g_realtimeEnabled;
+extern float g_rt_noise_mps2;
+extern float g_rt_hist_acc_mps2[10];
+extern float g_rt_hist_vel_mmps[10];
+extern float g_rt_hist_disp_mm[10];
+extern uint8_t g_rt_hist_count;
+extern uint8_t g_rt_hist_idx;
+
+// Bitmasking of raw sensor LSBs: 0=off, 2,3,4 bits
+extern uint8_t g_rawMaskBits;

@@ -75,6 +75,45 @@ static void resetLivePreviewState()
   g_live_mag_disp_mm = 0;
 }
 
+// ======================= Persistent live preview sensor =======================
+static LIS2DW12 *g_liveSensor = nullptr;
+static bool g_liveSensorReady = false;
+
+static bool ensureLiveSensor()
+{
+  if (g_liveSensorReady && g_liveSensor && !g_calDirty)
+    return true;
+
+  if (!g_liveSensor)
+    g_liveSensor = new LIS2DW12(Wire, 0x18);
+
+  Wire.setClock(1000000);
+  if (!g_liveSensor->begin(-1, -1, 1000000))
+  {
+    g_liveSensorReady = false;
+    return false;
+  }
+
+  LIS2DW12::Config cfg;
+  cfg.mode = LIS2DW12::Mode::HighPerf;
+  cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
+  cfg.fs = LIS2DW12::FullScale::G2;
+  cfg.lowNoise = true;
+  cfg.bdu = true;
+  cfg.autoInc = true;
+  g_liveSensor->applyConfig(cfg);
+  g_liveSensor->setRateHz(LIVE_PREVIEW_HZ);
+  g_liveSensor->loadCalibrationNVS("lis2dw12", "cal");
+  g_calDirty = false;
+  g_liveSensorReady = true;
+  return true;
+}
+
+static void invalidateLiveSensor()
+{
+  g_liveSensorReady = false;
+}
+
 // ======================= Helpers =======================
 static bool isSafeAccelFile(String p)
 {
@@ -407,13 +446,25 @@ static void recordTask(void * /*arg*/)
     vTaskDelete(nullptr);
     return;
   }
+  // Re-open file in append mode and keep it open during recording
   f.close();
+  File wf = LittleFS.open(path, "a");
+  if (!wf)
+  {
+    if (g_i2cMutex)
+      xSemaphoreGive(g_i2cMutex);
+    g_recording = false;
+    g_recTask = nullptr;
+    vTaskDelete(nullptr);
+    return;
+  }
 
   const uint32_t targetN = (uint32_t)g_cfg.hz * (uint32_t)g_cfg.sec;
   const size_t CHUNK_N = 1024;
   Sample6 *chunk = (Sample6 *)malloc(CHUNK_N * sizeof(Sample6));
   if (!chunk)
   {
+    wf.close();
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
     g_recording = false;
@@ -428,8 +479,9 @@ static void recordTask(void * /*arg*/)
   uint32_t tStart = millis();
   uint32_t idx = 0;
   uint32_t maxBacklog = 0;
+  bool writeError = false;
 
-  while (idx < targetN && !g_stopRequested)
+  while (idx < targetN && !g_stopRequested && !writeError)
   {
     uint32_t localDue = 0;
     portENTER_CRITICAL(&mux);
@@ -440,7 +492,7 @@ static void recordTask(void * /*arg*/)
     if (localDue > maxBacklog)
       maxBacklog = localDue;
 
-    while (localDue && idx < targetN && !g_stopRequested)
+    while (localDue && idx < targetN && !g_stopRequested && !writeError)
     {
       size_t fill = 0;
 
@@ -460,14 +512,13 @@ static void recordTask(void * /*arg*/)
 
       if (fill)
       {
-        File wf = LittleFS.open(path, "a");
-        if (!wf)
-          break;
         size_t bytes = fill * sizeof(Sample6);
         size_t wrote = wf.write((uint8_t *)chunk, bytes);
-        wf.close();
         if (wrote != bytes)
+        {
+          writeError = true;
           break;
+        }
         g_samplesWritten = idx;
       }
     }
@@ -477,6 +528,7 @@ static void recordTask(void * /*arg*/)
   }
 
   stopTimer();
+  wf.close();
   free(chunk);
 
   g_samplesWritten = idx;
@@ -529,6 +581,7 @@ static void calibrateStaticTask(void * /*arg*/)
   if (g_i2cMutex)
     xSemaphoreGive(g_i2cMutex);
   g_calibratingStatic = false;
+  invalidateLiveSensor();
   resetLivePreviewState();
   vTaskDelete(nullptr);
 }
@@ -592,6 +645,7 @@ static void calibrate6PosTask(void * /*arg*/)
 
   g_calibStep = -1;
   g_calibrating6 = false;
+  invalidateLiveSensor();
   resetLivePreviewState();
   vTaskDelete(nullptr);
 }
@@ -1116,9 +1170,7 @@ void handleApiLive()
     }
   }
 
-  Wire.setClock(1000000);
-  LIS2DW12 lis(Wire, 0x18);
-  if (!lis.begin(-1, -1, 1000000))
+  if (!ensureLiveSensor())
   {
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
@@ -1126,22 +1178,10 @@ void handleApiLive()
     return;
   }
 
-  LIS2DW12::Config cfg;
-  cfg.mode = LIS2DW12::Mode::HighPerf;
-  cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
-  cfg.fs = LIS2DW12::FullScale::G2;
-  cfg.lowNoise = true;
-  cfg.bdu = true;
-  cfg.autoInc = true;
-  lis.applyConfig(cfg);
-  lis.setRateHz(LIVE_PREVIEW_HZ);
-
-  lis.loadCalibrationNVS("lis2dw12", "cal");
-  g_calDirty = false;
-
+  LIS2DW12 &lis = *g_liveSensor;
   auto cal = lis.getCalibration();
   const uint8_t resBits = lis.activeResolutionBits();
-  const uint8_t fs_g = fsToByte(cfg.fs);
+  const uint8_t fs_g = fsToByte(lis.getFullScale());
 
   float cutoff = g_live_lp_cut_hz;
   if (server.hasArg("fc"))
@@ -1500,19 +1540,19 @@ void registerRoutes()
   server.on("/api/list", handleApiList);
   server.on("/api/fsinfo", handleApiFsInfo);
 
-  server.on("/api/start", handleApiStart);
-  server.on("/api/stop", handleApiStop);
+  server.on("/api/start", HTTP_GET, handleApiStart);
+  server.on("/api/stop", HTTP_GET, handleApiStop);
 
-  server.on("/download", handleDownload);
-  server.on("/download_csv", handleDownloadCSV);
-  server.on("/api/delete", handleApiDelete);
+  server.on("/download", HTTP_GET, handleDownload);
+  server.on("/download_csv", HTTP_GET, handleDownloadCSV);
+  server.on("/api/delete", HTTP_GET, handleApiDelete);
 
-  server.on("/api/calibrate_static", handleApiCalibrateStatic);
-  server.on("/api/calibrate6", handleApiCalibrate6);
+  server.on("/api/calibrate_static", HTTP_GET, handleApiCalibrateStatic);
+  server.on("/api/calibrate6", HTTP_GET, handleApiCalibrate6);
 
-  server.on("/api/live", handleApiLive);
+  server.on("/api/live", HTTP_GET, handleApiLive);
 
-  server.on("/api/reset", handleApiReset);
+  server.on("/api/reset", HTTP_GET, handleApiReset);
   server.on("/update", HTTP_GET, handleUpdateGet);
   server.on("/update", HTTP_POST, handleUpdatePost, handleUpdateUpload);
 
@@ -1587,11 +1627,9 @@ void handleDownloadCSV()
   hdr += "# fs_g=" + String(h.fs_g) + "\n";
   hdr += "# res_bits=" + String(h.res_bits) + "\n";
   hdr += "# q_bits=" + String(h.q_bits) + "\n";
-  hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
-  hdr += "# fs_g=" + String(h.fs_g) + "\n";
-  hdr += "# res_bits=" + String(h.res_bits) + "\n";
   hdr += "# cal_offset_g=" + String(h.cal_offset_g[0], 6) + "," + String(h.cal_offset_g[1], 6) + "," + String(h.cal_offset_g[2], 6) + "\n";
   hdr += "# cal_scale=" + String(h.cal_scale[0], 6) + "," + String(h.cal_scale[1], 6) + "," + String(h.cal_scale[2], 6) + "\n";
+  hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
 
   server.sendContent(hdr);
 

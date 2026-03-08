@@ -6,3 +6,6 @@
 libdeps
 test
 build
+
+# WiFi credentials - do not commit real passwords
+src/config.cpp

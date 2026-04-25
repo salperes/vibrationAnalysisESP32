@@ -6,13 +6,27 @@
 #include "file_handlers.h"
 
 // ======================= Noise measurement =======================
+// Computes the AC RMS of the 3-axis acceleration vector magnitude
+// after subtracting the per-axis mean (DC / gravity tilt component).
+// This is the "still-on-surface" baseline noise floor for the
+// realtime ISO 20816 path.
 static float measureRealtimeNoise(LIS2DW12 &lis, const uint8_t resBits, const uint8_t fs_g)
 {
   const uint16_t samples = 400; // ~0.5s @800 Hz
-  double sumSq = 0;
-  uint16_t valid = 0;
+
+  float *bx = (float *)malloc(samples * sizeof(float));
+  float *by = (float *)malloc(samples * sizeof(float));
+  float *bz = (float *)malloc(samples * sizeof(float));
+  if (!bx || !by || !bz)
+  {
+    free(bx);
+    free(by);
+    free(bz);
+    return 0.0f;
+  }
 
   auto cal = lis.getCalibration();
+  uint16_t valid = 0;
 
   for (uint16_t i = 0; i < samples; i++)
   {
@@ -34,24 +48,50 @@ static float measureRealtimeNoise(LIS2DW12 &lis, const uint8_t resBits, const ui
     float gx = rawAlignedToG(axRaw, resBits, fs_g);
     float gy = rawAlignedToG(ayRaw, resBits, fs_g);
     float gz = rawAlignedToG(azRaw, resBits, fs_g);
-
     gx = applyCal1(gx, cal.offset_g[0], cal.scale[0]);
     gy = applyCal1(gy, cal.offset_g[1], cal.scale[1]);
     gz = applyCal1(gz, cal.offset_g[2], cal.scale[2]);
 
-    float ax = gx * GRAVITY_MPS2;
-    float ay = gy * GRAVITY_MPS2;
-    float az = gz * GRAVITY_MPS2;
-
-    float mag = sqrtf(ax * ax + ay * ay + az * az);
-    float diff = mag - GRAVITY_MPS2;
-    sumSq += (double)diff * (double)diff;
+    bx[valid] = gx * GRAVITY_MPS2;
+    by[valid] = gy * GRAVITY_MPS2;
+    bz[valid] = gz * GRAVITY_MPS2;
     valid++;
     delayMicroseconds(1200);
   }
 
   if (!valid)
+  {
+    free(bx);
+    free(by);
+    free(bz);
     return 0.0f;
+  }
+
+  double sx = 0, sy = 0, sz = 0;
+  for (uint16_t i = 0; i < valid; i++)
+  {
+    sx += bx[i];
+    sy += by[i];
+    sz += bz[i];
+  }
+  const float mx = (float)(sx / (double)valid);
+  const float my = (float)(sy / (double)valid);
+  const float mz = (float)(sz / (double)valid);
+
+  double sumSq = 0;
+  for (uint16_t i = 0; i < valid; i++)
+  {
+    const float ax = bx[i] - mx;
+    const float ay = by[i] - my;
+    const float az = bz[i] - mz;
+    const float m2 = ax * ax + ay * ay + az * az;
+    sumSq += (double)m2;
+  }
+
+  free(bx);
+  free(by);
+  free(bz);
+
   return sqrtf((float)(sumSq / (double)valid));
 }
 
@@ -123,6 +163,9 @@ void handleApiRealtimeConfig()
 }
 
 // ======================= Live preview =======================
+// All ax/ay/az/vx/vy/vz/dx/dy/dz fields are AC RMS values (mean-removed, then
+// LPF, then integrated for vel/disp). dt_us is the measured per-sample period
+// for this window; eff_hz = 1e6 / dt_us.
 void handleApiLive()
 {
   if (g_recording || g_calibratingStatic || g_calibrating6)
@@ -134,22 +177,25 @@ void handleApiLive()
   uint32_t now = millis();
   if (!g_realtimeEnabled && now - g_liveLastMs < 1000)
   {
+    const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
     String s = "{";
     s += "\"enabled\":true,";
     s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+    s += "\"dt_us\":" + String(g_live_dt_us) + ",";
+    s += "\"eff_hz\":" + String(effHz, 1) + ",";
     s += "\"fc\":" + String(g_live_lp_cut_hz, 1) + ",";
-    s += "\"ax\":" + String(g_live_acc_mps2[0], 3) + ",";
-    s += "\"ay\":" + String(g_live_acc_mps2[1], 3) + ",";
-    s += "\"az\":" + String(g_live_acc_mps2[2], 3) + ",";
-    s += "\"mag\":" + String(g_live_mag_acc, 3) + ",";
-    s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 2) + ",";
-    s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 2) + ",";
-    s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 2) + ",";
-    s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 2) + ",";
-    s += "\"dx_mm\":" + String(g_live_disp_mm[0], 2) + ",";
-    s += "\"dy_mm\":" + String(g_live_disp_mm[1], 2) + ",";
-    s += "\"dz_mm\":" + String(g_live_disp_mm[2], 2) + ",";
-    s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 2);
+    s += "\"ax\":" + String(g_live_acc_mps2[0], 4) + ",";
+    s += "\"ay\":" + String(g_live_acc_mps2[1], 4) + ",";
+    s += "\"az\":" + String(g_live_acc_mps2[2], 4) + ",";
+    s += "\"mag\":" + String(g_live_mag_acc, 4) + ",";
+    s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 3) + ",";
+    s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 3) + ",";
+    s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 3) + ",";
+    s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 3) + ",";
+    s += "\"dx_mm\":" + String(g_live_disp_mm[0], 4) + ",";
+    s += "\"dy_mm\":" + String(g_live_disp_mm[1], 4) + ",";
+    s += "\"dz_mm\":" + String(g_live_disp_mm[2], 4) + ",";
+    s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 4);
     s += "}";
     server.send(200, "application/json", s);
     return;
@@ -204,138 +250,29 @@ void handleApiLive()
   }
   g_live_lp_cut_hz = cutoff;
 
-  const uint16_t samples = min((uint16_t)200, LIVE_PREVIEW_HZ);
-  const float dt = 1.0f / (float)LIVE_PREVIEW_HZ;
-  const float tau = 1.0f / (2.0f * PI * cutoff);
-  const float alpha = dt / (tau + dt);
+  const uint16_t N = min((uint16_t)200, LIVE_PREVIEW_HZ);
 
-  double sumAcc[3] = {0, 0, 0};
-  float vel[3] = {0, 0, 0};
-  float disp[3] = {0, 0, 0};
-  float lpf[3] = {0, 0, 0};
-  bool lpfInit = false;
-  uint16_t valid = 0;
-
-  if (!g_realtimeEnabled)
+  // Heap-allocated per-axis buffers (3 * N * 4 bytes ~= 2.4 KB at N=200).
+  // Acquiring all samples first lets us compute the per-axis mean (DC removal)
+  // before integration, which is essential to suppress gravity-tilt drift in
+  // the velocity/displacement integrals.
+  float *bx = (float *)malloc(N * sizeof(float));
+  float *by = (float *)malloc(N * sizeof(float));
+  float *bz = (float *)malloc(N * sizeof(float));
+  if (!bx || !by || !bz)
   {
-    for (uint16_t i = 0; i < samples; i++)
-    {
-      int16_t axRaw, ayRaw, azRaw;
-      if (!g_liveSensor.readRawAligned(axRaw, ayRaw, azRaw))
-      {
-        delayMicroseconds(1200);
-        continue;
-      }
-
-      if (g_rawMaskBits)
-      {
-        int16_t mask = ~((1 << g_rawMaskBits) - 1);
-        axRaw &= mask;
-        ayRaw &= mask;
-        azRaw &= mask;
-      }
-
-      float gx = rawAlignedToG(axRaw, resBits, fs_g);
-      float gy = rawAlignedToG(ayRaw, resBits, fs_g);
-      float gz = rawAlignedToG(azRaw, resBits, fs_g);
-
-      gx = applyCal1(gx, cal.offset_g[0], cal.scale[0]);
-      gy = applyCal1(gy, cal.offset_g[1], cal.scale[1]);
-      gz = applyCal1(gz, cal.offset_g[2], cal.scale[2]);
-
-      float ax = gx * GRAVITY_MPS2;
-      float ay = gy * GRAVITY_MPS2;
-      float az = gz * GRAVITY_MPS2;
-
-      if (!lpfInit)
-      {
-        lpf[0] = ax;
-        lpf[1] = ay;
-        lpf[2] = az;
-        lpfInit = true;
-      }
-      else
-      {
-        lpf[0] += alpha * (ax - lpf[0]);
-        lpf[1] += alpha * (ay - lpf[1]);
-        lpf[2] += alpha * (az - lpf[2]);
-      }
-
-      sumAcc[0] += lpf[0];
-      sumAcc[1] += lpf[1];
-      sumAcc[2] += lpf[2];
-
-      vel[0] += lpf[0] * dt;
-      vel[1] += lpf[1] * dt;
-      vel[2] += lpf[2] * dt;
-
-      disp[0] += vel[0] * dt;
-      disp[1] += vel[1] * dt;
-      disp[2] += vel[2] * dt;
-
-      valid++;
-      delayMicroseconds(1200);
-    }
-
+    free(bx);
+    free(by);
+    free(bz);
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
-
-    if (!valid)
-    {
-      g_liveLastMs = 0;
-      server.send(200, "application/json", "{\"enabled\":false}");
-      return;
-    }
-
-    const float invN = 1.0f / (float)valid;
-    for (int i = 0; i < 3; i++)
-    {
-      g_live_acc_mps2[i] = (float)(sumAcc[i] * invN);
-      g_live_vel_mmps[i] = vel[i] * 1000.0f;
-      g_live_disp_mm[i] = disp[i] * 1000.0f;
-      g_live_g[i] = g_live_acc_mps2[i] / GRAVITY_MPS2;
-    }
-
-    g_live_mag_acc = sqrtf(g_live_acc_mps2[0] * g_live_acc_mps2[0] +
-                           g_live_acc_mps2[1] * g_live_acc_mps2[1] +
-                           g_live_acc_mps2[2] * g_live_acc_mps2[2]);
-    g_live_mag_vel_mmps = sqrtf(g_live_vel_mmps[0] * g_live_vel_mmps[0] +
-                                g_live_vel_mmps[1] * g_live_vel_mmps[1] +
-                                g_live_vel_mmps[2] * g_live_vel_mmps[2]);
-    g_live_mag_disp_mm = sqrtf(g_live_disp_mm[0] * g_live_disp_mm[0] +
-                               g_live_disp_mm[1] * g_live_disp_mm[1] +
-                               g_live_disp_mm[2] * g_live_disp_mm[2]);
-
-    String s = "{";
-    s += "\"enabled\":true,";
-    s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
-    s += "\"fc\":" + String(cutoff, 1) + ",";
-    s += "\"ax\":" + String(g_live_acc_mps2[0], 3) + ",";
-    s += "\"ay\":" + String(g_live_acc_mps2[1], 3) + ",";
-    s += "\"az\":" + String(g_live_acc_mps2[2], 3) + ",";
-    s += "\"mag\":" + String(g_live_mag_acc, 3) + ",";
-    s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 2) + ",";
-    s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 2) + ",";
-    s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 2) + ",";
-    s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 2) + ",";
-    s += "\"dx_mm\":" + String(g_live_disp_mm[0], 2) + ",";
-    s += "\"dy_mm\":" + String(g_live_disp_mm[1], 2) + ",";
-    s += "\"dz_mm\":" + String(g_live_disp_mm[2], 2) + ",";
-    s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 2);
-    s += "}";
-    server.send(200, "application/json", s);
+    server.send(500, "application/json", "{\"enabled\":false,\"err\":\"oom\"}");
     return;
   }
 
-  // ===== Realtime ISO20816 path (magnitude-only) =====
-  double sumAccMag = 0;
-  double sumVelMag = 0;
-  double sumDispMag = 0;
-  float velMag = 0;
-  float dispMag = 0;
-  uint16_t validRt = 0;
-
-  for (uint16_t i = 0; i < samples; i++)
+  uint16_t valid = 0;
+  uint32_t t_start = micros();
+  for (uint16_t i = 0; i < N; i++)
   {
     int16_t axRaw, ayRaw, azRaw;
     if (!g_liveSensor.readRawAligned(axRaw, ayRaw, azRaw))
@@ -343,7 +280,6 @@ void handleApiLive()
       delayMicroseconds(1200);
       continue;
     }
-
     if (g_rawMaskBits)
     {
       int16_t mask = ~((1 << g_rawMaskBits) - 1);
@@ -355,45 +291,197 @@ void handleApiLive()
     float gx = rawAlignedToG(axRaw, resBits, fs_g);
     float gy = rawAlignedToG(ayRaw, resBits, fs_g);
     float gz = rawAlignedToG(azRaw, resBits, fs_g);
-
     gx = applyCal1(gx, cal.offset_g[0], cal.scale[0]);
     gy = applyCal1(gy, cal.offset_g[1], cal.scale[1]);
     gz = applyCal1(gz, cal.offset_g[2], cal.scale[2]);
 
-    float ax = gx * GRAVITY_MPS2;
-    float ay = gy * GRAVITY_MPS2;
-    float az = gz * GRAVITY_MPS2;
-
-    float accMag = fabsf(sqrtf(ax * ax + ay * ay + az * az) - GRAVITY_MPS2);
-    accMag = max(0.0f, accMag - g_rt_noise_mps2);
-
-    velMag += accMag * dt;
-    dispMag += velMag * dt;
-
-    sumAccMag += accMag;
-    sumVelMag += fabsf(velMag);
-    sumDispMag += fabsf(dispMag);
-    validRt++;
+    bx[valid] = gx * GRAVITY_MPS2;
+    by[valid] = gy * GRAVITY_MPS2;
+    bz[valid] = gz * GRAVITY_MPS2;
+    valid++;
     delayMicroseconds(1200);
   }
+  uint32_t t_end = micros();
 
   if (g_i2cMutex)
     xSemaphoreGive(g_i2cMutex);
 
-  if (!validRt)
+  if (!valid)
   {
+    free(bx);
+    free(by);
+    free(bz);
+    g_liveLastMs = 0;
     server.send(200, "application/json", "{\"enabled\":false}");
     return;
   }
 
-  const float invRt = 1.0f / (float)validRt;
-  float avgAcc1s = (float)(sumAccMag * invRt);
-  float avgVel1s = (float)(sumVelMag * invRt) * 1000.0f;
-  float avgDisp1s = (float)(sumDispMag * invRt) * 1000.0f;
+  // Measured dt over the actual sampling window (loop overhead included).
+  const float dt = (float)(t_end - t_start) * 1e-6f / (float)valid;
+  g_live_dt_us = (uint32_t)((t_end - t_start) / valid);
 
-  g_rt_hist_acc_mps2[g_rt_hist_idx] = avgAcc1s;
-  g_rt_hist_vel_mmps[g_rt_hist_idx] = avgVel1s;
-  g_rt_hist_disp_mm[g_rt_hist_idx] = avgDisp1s;
+  // Per-axis mean (DC component: gravity tilt + sensor offset residual).
+  double sx = 0, sy = 0, sz = 0;
+  for (uint16_t i = 0; i < valid; i++)
+  {
+    sx += bx[i];
+    sy += by[i];
+    sz += bz[i];
+  }
+  const float mx = (float)(sx / (double)valid);
+  const float my = (float)(sy / (double)valid);
+  const float mz = (float)(sz / (double)valid);
+
+  // First-order LPF on the mean-removed signal (cutoff = `cutoff` Hz).
+  const float tau = 1.0f / (2.0f * PI * cutoff);
+  const float alpha = dt / (tau + dt);
+
+  if (!g_realtimeEnabled)
+  {
+    // Per-axis: AC -> LPF -> integrate vel/disp -> RMS
+    float lpf[3] = {0, 0, 0};
+    bool lpfInit = false;
+    float vel[3] = {0, 0, 0};
+    float disp[3] = {0, 0, 0};
+    double ss_a[3] = {0, 0, 0};
+    double ss_v[3] = {0, 0, 0};
+    double ss_d[3] = {0, 0, 0};
+
+    for (uint16_t i = 0; i < valid; i++)
+    {
+      const float a[3] = {bx[i] - mx, by[i] - my, bz[i] - mz};
+      if (!lpfInit)
+      {
+        lpf[0] = a[0];
+        lpf[1] = a[1];
+        lpf[2] = a[2];
+        lpfInit = true;
+      }
+      else
+      {
+        lpf[0] += alpha * (a[0] - lpf[0]);
+        lpf[1] += alpha * (a[1] - lpf[1]);
+        lpf[2] += alpha * (a[2] - lpf[2]);
+      }
+      vel[0] += lpf[0] * dt;
+      vel[1] += lpf[1] * dt;
+      vel[2] += lpf[2] * dt;
+      disp[0] += vel[0] * dt;
+      disp[1] += vel[1] * dt;
+      disp[2] += vel[2] * dt;
+
+      ss_a[0] += (double)lpf[0] * lpf[0];
+      ss_a[1] += (double)lpf[1] * lpf[1];
+      ss_a[2] += (double)lpf[2] * lpf[2];
+      ss_v[0] += (double)vel[0] * vel[0];
+      ss_v[1] += (double)vel[1] * vel[1];
+      ss_v[2] += (double)vel[2] * vel[2];
+      ss_d[0] += (double)disp[0] * disp[0];
+      ss_d[1] += (double)disp[1] * disp[1];
+      ss_d[2] += (double)disp[2] * disp[2];
+    }
+
+    free(bx);
+    free(by);
+    free(bz);
+
+    const float invN = 1.0f / (float)valid;
+    for (int k = 0; k < 3; k++)
+    {
+      g_live_acc_mps2[k] = sqrtf((float)(ss_a[k] * invN));
+      g_live_vel_mmps[k] = sqrtf((float)(ss_v[k] * invN)) * 1000.0f;
+      g_live_disp_mm[k]  = sqrtf((float)(ss_d[k] * invN)) * 1000.0f;
+      g_live_g[k]        = g_live_acc_mps2[k] / GRAVITY_MPS2;
+    }
+    g_live_mag_acc = sqrtf(g_live_acc_mps2[0] * g_live_acc_mps2[0] +
+                           g_live_acc_mps2[1] * g_live_acc_mps2[1] +
+                           g_live_acc_mps2[2] * g_live_acc_mps2[2]);
+    g_live_mag_vel_mmps = sqrtf(g_live_vel_mmps[0] * g_live_vel_mmps[0] +
+                                g_live_vel_mmps[1] * g_live_vel_mmps[1] +
+                                g_live_vel_mmps[2] * g_live_vel_mmps[2]);
+    g_live_mag_disp_mm = sqrtf(g_live_disp_mm[0] * g_live_disp_mm[0] +
+                               g_live_disp_mm[1] * g_live_disp_mm[1] +
+                               g_live_disp_mm[2] * g_live_disp_mm[2]);
+
+    const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
+    String s = "{";
+    s += "\"enabled\":true,";
+    s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+    s += "\"dt_us\":" + String(g_live_dt_us) + ",";
+    s += "\"eff_hz\":" + String(effHz, 1) + ",";
+    s += "\"fc\":" + String(cutoff, 1) + ",";
+    s += "\"ax\":" + String(g_live_acc_mps2[0], 4) + ",";
+    s += "\"ay\":" + String(g_live_acc_mps2[1], 4) + ",";
+    s += "\"az\":" + String(g_live_acc_mps2[2], 4) + ",";
+    s += "\"mag\":" + String(g_live_mag_acc, 4) + ",";
+    s += "\"vx_mmps\":" + String(g_live_vel_mmps[0], 3) + ",";
+    s += "\"vy_mmps\":" + String(g_live_vel_mmps[1], 3) + ",";
+    s += "\"vz_mmps\":" + String(g_live_vel_mmps[2], 3) + ",";
+    s += "\"vmag_mmps\":" + String(g_live_mag_vel_mmps, 3) + ",";
+    s += "\"dx_mm\":" + String(g_live_disp_mm[0], 4) + ",";
+    s += "\"dy_mm\":" + String(g_live_disp_mm[1], 4) + ",";
+    s += "\"dz_mm\":" + String(g_live_disp_mm[2], 4) + ",";
+    s += "\"dmag_mm\":" + String(g_live_mag_disp_mm, 4);
+    s += "}";
+    server.send(200, "application/json", s);
+    return;
+  }
+
+  // ===== Realtime ISO20816 path: per-axis mean-removed integration,
+  //       then 3-axis vector magnitude RMS for output. =====
+  float lpf_rt[3] = {0, 0, 0};
+  bool lpfInitRt = false;
+  float velRt[3] = {0, 0, 0};
+  float dispRt[3] = {0, 0, 0};
+  double ss_a_mag2 = 0;
+  double ss_v_mag2 = 0;
+  double ss_d_mag2 = 0;
+
+  for (uint16_t i = 0; i < valid; i++)
+  {
+    const float a[3] = {bx[i] - mx, by[i] - my, bz[i] - mz};
+    if (!lpfInitRt)
+    {
+      lpf_rt[0] = a[0];
+      lpf_rt[1] = a[1];
+      lpf_rt[2] = a[2];
+      lpfInitRt = true;
+    }
+    else
+    {
+      lpf_rt[0] += alpha * (a[0] - lpf_rt[0]);
+      lpf_rt[1] += alpha * (a[1] - lpf_rt[1]);
+      lpf_rt[2] += alpha * (a[2] - lpf_rt[2]);
+    }
+    velRt[0] += lpf_rt[0] * dt;
+    velRt[1] += lpf_rt[1] * dt;
+    velRt[2] += lpf_rt[2] * dt;
+    dispRt[0] += velRt[0] * dt;
+    dispRt[1] += velRt[1] * dt;
+    dispRt[2] += velRt[2] * dt;
+
+    ss_a_mag2 += (double)(lpf_rt[0] * lpf_rt[0] + lpf_rt[1] * lpf_rt[1] + lpf_rt[2] * lpf_rt[2]);
+    ss_v_mag2 += (double)(velRt[0] * velRt[0] + velRt[1] * velRt[1] + velRt[2] * velRt[2]);
+    ss_d_mag2 += (double)(dispRt[0] * dispRt[0] + dispRt[1] * dispRt[1] + dispRt[2] * dispRt[2]);
+  }
+
+  free(bx);
+  free(by);
+  free(bz);
+
+  const float invRt = 1.0f / (float)valid;
+  // Quadrature subtraction of noise floor from acc magnitude RMS:
+  // rms_signal = sqrt(rms_total^2 - rms_noise^2) when uncorrelated.
+  const float rms_a_raw = sqrtf((float)(ss_a_mag2 * invRt));
+  const float rms_a = (rms_a_raw > g_rt_noise_mps2)
+                          ? sqrtf(rms_a_raw * rms_a_raw - g_rt_noise_mps2 * g_rt_noise_mps2)
+                          : 0.0f;
+  const float rms_v = sqrtf((float)(ss_v_mag2 * invRt)) * 1000.0f;
+  const float rms_d = sqrtf((float)(ss_d_mag2 * invRt)) * 1000.0f;
+
+  g_rt_hist_acc_mps2[g_rt_hist_idx] = rms_a;
+  g_rt_hist_vel_mmps[g_rt_hist_idx] = rms_v;
+  g_rt_hist_disp_mm[g_rt_hist_idx] = rms_d;
   g_rt_hist_idx = (g_rt_hist_idx + 1) % 10;
   if (g_rt_hist_count < 10)
     g_rt_hist_count++;
@@ -408,27 +496,30 @@ void handleApiLive()
     return (float)(sum / (double)use);
   };
 
-  float avgAcc5 = avgN(g_rt_hist_acc_mps2, 5);
-  float avgVel5 = avgN(g_rt_hist_vel_mmps, 5);
-  float avgDisp5 = avgN(g_rt_hist_disp_mm, 5);
-  float avgAcc10 = avgN(g_rt_hist_acc_mps2, 10);
-  float avgVel10 = avgN(g_rt_hist_vel_mmps, 10);
-  float avgDisp10 = avgN(g_rt_hist_disp_mm, 10);
+  const float avgAcc5 = avgN(g_rt_hist_acc_mps2, 5);
+  const float avgVel5 = avgN(g_rt_hist_vel_mmps, 5);
+  const float avgDisp5 = avgN(g_rt_hist_disp_mm, 5);
+  const float avgAcc10 = avgN(g_rt_hist_acc_mps2, 10);
+  const float avgVel10 = avgN(g_rt_hist_vel_mmps, 10);
+  const float avgDisp10 = avgN(g_rt_hist_disp_mm, 10);
 
+  const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
   String s = "{";
   s += "\"enabled\":true,";
   s += "\"realtime\":true,";
   s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+  s += "\"dt_us\":" + String(g_live_dt_us) + ",";
+  s += "\"eff_hz\":" + String(effHz, 1) + ",";
   s += "\"noise_mps2\":" + String(g_rt_noise_mps2, 4) + ",";
-  s += "\"avg1\":{\"acc_mps2\":" + String(avgAcc1s, 3) + ",";
-  s += "\"vel_mmps\":" + String(avgVel1s, 2) + ",";
-  s += "\"disp_mm\":" + String(avgDisp1s, 3) + "},";
+  s += "\"avg1\":{\"acc_mps2\":" + String(rms_a, 3) + ",";
+  s += "\"vel_mmps\":" + String(rms_v, 3) + ",";
+  s += "\"disp_mm\":" + String(rms_d, 4) + "},";
   s += "\"avg5\":{\"acc_mps2\":" + String(avgAcc5, 3) + ",";
-  s += "\"vel_mmps\":" + String(avgVel5, 2) + ",";
-  s += "\"disp_mm\":" + String(avgDisp5, 3) + "},";
+  s += "\"vel_mmps\":" + String(avgVel5, 3) + ",";
+  s += "\"disp_mm\":" + String(avgDisp5, 4) + "},";
   s += "\"avg10\":{\"acc_mps2\":" + String(avgAcc10, 3) + ",";
-  s += "\"vel_mmps\":" + String(avgVel10, 2) + ",";
-  s += "\"disp_mm\":" + String(avgDisp10, 3) + "}";
+  s += "\"vel_mmps\":" + String(avgVel10, 3) + ",";
+  s += "\"disp_mm\":" + String(avgDisp10, 4) + "}";
   s += "}";
   server.send(200, "application/json", s);
 }

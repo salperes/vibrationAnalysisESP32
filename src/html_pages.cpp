@@ -250,8 +250,9 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     </div>
 
     <div class="card">
-      <h2>Live (1s preview @800 Hz)</h2>
+      <h2>Live RMS (250 ms window @800 Hz target)</h2>
       <canvas id="chart" width="420" height="160" style="width:100%;height:160px;border:1px solid #eee;border-radius:10px;background:#fff"></canvas>
+      <div class="small" id="liveRate">rate: -</div>
       <pre id="live">acc: -, vel: -, disp: -</pre>
       <div class="small" style="margin-top:8px">
         <label><input type="checkbox" id="chkRealtime" onchange="toggleRealtime(this.checked)"> Real-time ISO 20816 (mag only)</label>
@@ -580,11 +581,14 @@ async function refreshLive() {
     const a1 = j.avg1 || {};
     const a5 = j.avg5 || {};
     const a10 = j.avg10 || {};
+    const eff = (typeof j.eff_hz === "number") ? j.eff_hz : 0;
+    const dt  = (typeof j.dt_us === "number") ? j.dt_us : 0;
     const txt =
-      `1s  acc:${(a1.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a1.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a1.disp_mm || 0).toFixed(3)} mm\n` +
-      `5s  acc:${(a5.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a5.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a5.disp_mm || 0).toFixed(3)} mm\n` +
-      `10s acc:${(a10.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a10.vel_mmps || 0).toFixed(2)} mm/s  disp:${(a10.disp_mm || 0).toFixed(3)} mm\n` +
-      `noise: ${(j.noise_mps2 || 0).toFixed(4)} m/s^2`;
+      `RMS (mean-removed, noise-corrected acc):\n` +
+      `1s  acc:${(a1.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a1.vel_mmps || 0).toFixed(3)} mm/s  disp:${(a1.disp_mm || 0).toFixed(4)} mm\n` +
+      `5s  acc:${(a5.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a5.vel_mmps || 0).toFixed(3)} mm/s  disp:${(a5.disp_mm || 0).toFixed(4)} mm\n` +
+      `10s acc:${(a10.acc_mps2 || 0).toFixed(3)} m/s^2  vel:${(a10.vel_mmps || 0).toFixed(3)} mm/s  disp:${(a10.disp_mm || 0).toFixed(4)} mm\n` +
+      `noise floor: ${(j.noise_mps2 || 0).toFixed(4)} m/s^2  rate: ${eff.toFixed(1)} Hz (dt ${dt} us)`;
     document.getElementById("rtStats").textContent = txt;
     return;
   }
@@ -595,9 +599,16 @@ async function refreshLive() {
 
   if (typeof j.ax !== "number") return;
 
-  const accLine = `ACC (m/s^2)  X:${j.ax.toFixed(3)}  Y:${j.ay.toFixed(3)}  Z:${j.az.toFixed(3)}  MAG:${j.mag.toFixed(3)}`;
-  const velLine = `VEL (mm/s)  X:${j.vx_mmps.toFixed(2)}  Y:${j.vy_mmps.toFixed(2)}  Z:${j.vz_mmps.toFixed(2)}  MAG:${j.vmag_mmps.toFixed(2)}`;
-  const dispLine = `DISP (mm)   X:${j.dx_mm.toFixed(2)}  Y:${j.dy_mm.toFixed(2)}  Z:${j.dz_mm.toFixed(2)}  MAG:${j.dmag_mm.toFixed(2)}`;
+  const rateEl = document.getElementById("liveRate");
+  if (rateEl) {
+    const eff = (typeof j.eff_hz === "number") ? j.eff_hz : 0;
+    const dt  = (typeof j.dt_us === "number") ? j.dt_us : 0;
+    rateEl.textContent = `rate: ${eff.toFixed(1)} Hz  (dt = ${dt} us, target 800 Hz)`;
+  }
+
+  const accLine  = `ACC RMS (m/s^2)  X:${j.ax.toFixed(4)}  Y:${j.ay.toFixed(4)}  Z:${j.az.toFixed(4)}  MAG:${j.mag.toFixed(4)}`;
+  const velLine  = `VEL RMS (mm/s)   X:${j.vx_mmps.toFixed(3)}  Y:${j.vy_mmps.toFixed(3)}  Z:${j.vz_mmps.toFixed(3)}  MAG:${j.vmag_mmps.toFixed(3)}`;
+  const dispLine = `DISP RMS (mm)    X:${j.dx_mm.toFixed(4)}  Y:${j.dy_mm.toFixed(4)}  Z:${j.dz_mm.toFixed(4)}  MAG:${j.dmag_mm.toFixed(4)}`;
   document.getElementById("live").textContent = `${accLine}\n${velLine}\n${dispLine}`;
 
   const gx = j.ax / GRAVITY;

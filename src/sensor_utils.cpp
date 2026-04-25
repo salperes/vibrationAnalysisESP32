@@ -242,4 +242,5 @@ void resetLivePreviewState()
   g_live_mag_acc = 0;
   g_live_mag_vel_mmps = 0;
   g_live_mag_disp_mm = 0;
+  g_live_dt_us = 0;
 }

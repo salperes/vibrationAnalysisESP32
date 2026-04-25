@@ -1,4 +1,45 @@
 ---------------------------------------------------------
+Rev. ID    : 3
+Rev. Date  : 25.04.2026
+Rev. Time  : 09:55:25
+Rev. Prompt: Faz 4 (fizik duzeltmeleri) - vel/disp DC sizintisi + olculmus dt; tum cikti RMS
+
+Rev. Report: (
+Faz 4 - canli onizleme ve realtime ISO20816 yolunda fizik dogrulugu
+iyilestirildi. BREAKING: ax/ay/az ve vx/vy/vz, dx/dy/dz alanlari artik
+ANLIK ortalama yerine AC RMS degeri donuyor.
+
+- API: /api/live cevap semantigi degisti (BREAKING).
+  Eski: ax = pencere ortalamasi (DC + AC karisik); vel/disp = pencere sonu
+        kumulatif degeri.
+  Yeni: ax = AC RMS m/s^2 (mean-removed, LPF sonrasi RMS).
+        vx_mmps = vel RMS mm/s (3-eksen, ISO 20816 uyumlu).
+        dx_mm = disp RMS mm.
+- API: Yeni alanlar /api/live cevabinda: "dt_us" (gercek olculen ornekleme
+  periyodu, mikrosaniye), "eff_hz" (1e6/dt_us). Hem non-realtime hem
+  realtime kolu doner.
+- Sensor: handleApiLive 200 ornek heap buffer kullaniyor, t_start/t_end
+  micros() ile gercek dt olculuyor. Eski sabit dt = 1/800 (=1.25 ms)
+  varsayimi vs. gercek ~1.5-1.8 ms hatasi giderildi.
+- Sensor: Per-axis mean (DC removal) entegrasyondan once uygulaniyor;
+  gravity tilt'in vel/disp'e yapay sizinti yapmasi durduruldu (eski:
+  0.05g residual -> 250 ms'de 122 mm/s yapay vel).
+- Sensor: measureRealtimeNoise() artik proper mean-removed AC RMS
+  hesabi yapiyor (eski: ||a|| - g, kucuk tilt icin yetersiz).
+- Sensor: Realtime ISO20816 yolu artik per-axis mean-removed integrasyon
+  yapip 3-eksen vector magnitude RMS doner. Noise floor cikarmasi
+  quadrature mantigi ile: rms = sqrt(rms_total^2 - rms_noise^2).
+- Web UI: "Live RMS (250 ms window @800 Hz target)" basligi; her satirda
+  "RMS" ibaresi; gercek ornekleme hizi (eff_hz) ve dt_us kucuk fontla
+  gosteriliyor.
+- Firmware: g_live_dt_us yeni global eklendi (app_state.h/cpp);
+  resetLivePreviewState bunu da sifirliyor.
+- Firmware: APP_VERSION V3.9.3
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 69.2% (+3012 byte vs V3.9.2,
+RMS hesabi + heap buffer logic).
+)
+---------------------------------------------------------
 Rev. ID    : 2
 Rev. Date  : 25.04.2026
 Rev. Time  : 09:45:12

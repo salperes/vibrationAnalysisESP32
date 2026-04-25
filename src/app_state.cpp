@@ -36,6 +36,7 @@ float g_live_disp_mm[3] = {0, 0, 0};
 float g_live_mag_acc = 0;
 float g_live_mag_vel_mmps = 0;
 float g_live_mag_disp_mm = 0;
+uint32_t g_live_dt_us = 0;
 volatile bool g_calDirty = true; // calibration changed -> reload NVS
 
 bool g_apMode = false;

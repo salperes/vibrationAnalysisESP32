@@ -72,6 +72,7 @@ extern float g_live_disp_mm[3];
 extern float g_live_mag_acc;
 extern float g_live_mag_vel_mmps;
 extern float g_live_mag_disp_mm;
+extern uint32_t g_live_dt_us; // measured per-sample period during last live read
 extern volatile bool g_calDirty; // calibration changed -> reload NVS
 
 extern bool g_apMode;

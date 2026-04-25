@@ -128,7 +128,7 @@ static void calibrate6PosTask(void * /*arg*/)
 // ======================= HTTP Handlers =======================
 void handleApiCalibrateStatic()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;
@@ -146,7 +146,7 @@ void handleApiCalibrateStatic()
 
 void handleApiCalibrate6()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;

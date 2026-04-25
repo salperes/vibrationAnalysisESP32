@@ -98,7 +98,7 @@ static float measureRealtimeNoise(LIS2DW12 &lis, const uint8_t resBits, const ui
 // ======================= Realtime config =======================
 void handleApiRealtimeConfig()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;
@@ -168,7 +168,7 @@ void handleApiRealtimeConfig()
 // for this window; eff_hz = 1e6 / dt_us.
 void handleApiLive()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(200, "application/json", "{\"enabled\":false}");
     return;

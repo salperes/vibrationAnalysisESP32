@@ -187,6 +187,30 @@ extern uint8_t g_rt_hist_idx;
 // Bitmasking of raw sensor LSBs: 0=off, 2,3,4 bits
 extern uint8_t g_rawMaskBits;
 
+// ----- Trigger ("grab") mode state -----
+enum class TrigState : uint8_t { Idle = 0, Armed = 1, Triggered = 2, PostTail = 3 };
+
+extern volatile TrigState g_trigState;
+extern volatile bool g_trigDisarmRequested;
+extern volatile uint32_t g_trigArmedAtMs;     // millis when ARMED was entered
+extern volatile uint32_t g_trigFiredAtMs;     // millis when TRIGGERED entered (0 if not)
+extern volatile uint32_t g_trigPostStartMs;   // millis when POST_TAIL entered
+
+// User-supplied configuration (latched on /api/trigger_arm)
+extern uint16_t g_trigPreS;
+extern uint16_t g_trigPostS;
+extern uint16_t g_trigMaxS;
+extern uint8_t  g_trigMode;                   // 0=auto-baseline, 1=manual
+extern uint8_t  g_trigMult;                   // multiplier for auto mode
+extern float    g_trigManualThr;              // m/s^2 (manual mode)
+
+// Live status (updated by trigger task; consumed by /api/info)
+extern volatile float g_trigBaseline;         // measured baseline RMS (auto mode)
+extern volatile float g_trigCurrentRms;       // last evaluated 100 ms window
+extern volatile float g_trigEffThreshold;     // computed threshold actually used
+
+extern TaskHandle_t g_trigTask;
+
 // True when a valid calibration blob was found in NVS (set at boot and after
 // successful save). Read by /api/info to inform the UI.
 extern volatile bool g_calibPresent;

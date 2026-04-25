@@ -11,6 +11,7 @@
 #include "live_preview.h"
 #include "file_handlers.h"
 #include "sensor_utils.h"
+#include "trigger.h"
 
 // ======================= Version =======================
 static String versionJson()
@@ -75,7 +76,30 @@ static String infoJson()
   s += (g_calibPresent ? "true" : "false");
   s += ",";
   s += "\"serial\":\"" + jsonEscape(String(g_device_serial)) + "\",";
-  s += "\"deviceName\":\"" + jsonEscape(String(g_device_name)) + "\"";
+  s += "\"deviceName\":\"" + jsonEscape(String(g_device_name)) + "\",";
+
+  // Trigger / grab-mode state
+  const char *trigName = "Idle";
+  switch (g_trigState) {
+    case TrigState::Idle:      trigName = "Idle";      break;
+    case TrigState::Armed:     trigName = "Armed";     break;
+    case TrigState::Triggered: trigName = "Triggered"; break;
+    case TrigState::PostTail:  trigName = "PostTail";  break;
+  }
+  s += "\"trigState\":\"";
+  s += trigName;
+  s += "\",";
+  s += "\"trigBaseline\":" + String(g_trigBaseline, 4) + ",";
+  s += "\"trigCurrentRms\":" + String(g_trigCurrentRms, 4) + ",";
+  s += "\"trigThreshold\":" + String(g_trigEffThreshold, 4) + ",";
+
+  uint32_t now = millis();
+  uint32_t armedMs = (g_trigState != TrigState::Idle && g_trigArmedAtMs)
+                         ? (now - g_trigArmedAtMs) : 0;
+  uint32_t firedMs = (g_trigFiredAtMs)
+                         ? (now - g_trigFiredAtMs) : 0;
+  s += "\"trigArmedMs\":" + String(armedMs) + ",";
+  s += "\"trigFiredMs\":" + String(firedMs);
 
   s += "}";
   return s;
@@ -93,7 +117,7 @@ static void handleApiDeviceGet()
 
 static void handleApiDevicePost()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;
@@ -126,7 +150,7 @@ static void handleApiVersion() { server.send(200, "application/json", versionJso
 
 static void handleApiReset()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;
@@ -139,7 +163,7 @@ static void handleApiReset()
 // ======================= OTA firmware update =======================
 static void handleUpdateGet()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;
@@ -168,7 +192,7 @@ static void handleUpdatePost()
 
 static void handleUpdateUpload()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     g_updateLastError = "Busy";
     Update.abort();
@@ -183,7 +207,7 @@ static void handleUpdateUpload()
 
     Serial.printf("[UPDATE] Start: %s, size=%u\n", up.filename.c_str(), (unsigned)up.totalSize);
 
-    if (g_recording || g_calibratingStatic || g_calibrating6)
+    if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
     {
       g_updateLastError = "Busy";
       return;
@@ -269,4 +293,7 @@ void registerRoutes()
 
   server.on("/api/device", HTTP_GET, handleApiDeviceGet);
   server.on("/api/device", HTTP_POST, handleApiDevicePost);
+
+  server.on("/api/trigger_arm",    HTTP_POST, handleApiTriggerArm);
+  server.on("/api/trigger_disarm", HTTP_POST, handleApiTriggerDisarm);
 }

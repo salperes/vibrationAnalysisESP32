@@ -263,7 +263,7 @@ void handleDownloadCSV()
 
 void handleApiDelete()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;

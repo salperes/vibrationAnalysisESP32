@@ -40,6 +40,23 @@ void stopTimer()
   timer0 = nullptr;
 }
 
+uint32_t consumeTimerDue()
+{
+  uint32_t v;
+  portENTER_CRITICAL(&mux);
+  v = dueCount;
+  dueCount = 0;
+  portEXIT_CRITICAL(&mux);
+  return v;
+}
+
+void resetTimerDue()
+{
+  portENTER_CRITICAL(&mux);
+  dueCount = 0;
+  portEXIT_CRITICAL(&mux);
+}
+
 // ======================= Recording task =======================
 static void recordTask(void * /*arg*/)
 {
@@ -280,7 +297,7 @@ static bool parseHzFromUI(uint16_t uiHz, uint16_t &outHz, LIS2DW12::Mode &mode)
 // ======================= HTTP Handlers =======================
 void handleApiStart()
 {
-  if (g_recording || g_calibratingStatic || g_calibrating6)
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
   {
     server.send(409, "text/plain", "Busy");
     return;

@@ -1,4 +1,63 @@
 ---------------------------------------------------------
+Rev. ID    : 6
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:37:02
+Rev. Prompt: Faz 5C - trigger ("grab") mode firmware (state machine + ring buffer + RMS detector)
+
+Rev. Report: (
+"Ready-to-grab" akilli kayit modu firmware tarafinda tamam. Cihaz hareket
+algilayinca pre-roll ile birlikte otomatik kayit baslatir, sabit gelinceye
+kadar kaydeder, sonrasinda post-roll suresince devam edip kapatir.
+
+- Firmware: yeni global'ler (app_state.h/cpp):
+    enum TrigState (Idle, Armed, Triggered, PostTail) + g_trigState
+    g_trigPreS / g_trigPostS / g_trigMaxS / g_trigMode / g_trigMult /
+    g_trigManualThr  (kullanici parametreleri)
+    g_trigBaseline / g_trigCurrentRms / g_trigEffThreshold (canli durum)
+    g_trigArmedAtMs / g_trigFiredAtMs / g_trigPostStartMs (zaman damgalari)
+    g_trigDisarmRequested (clean shutdown sinyali)
+- Recording: recording.cpp'deki HW timer ortak helper'lara cikarildi
+    (consumeTimerDue, resetTimerDue) - trigger task ayni zamanlama
+    altyapisini paylasiyor. Manual record + grab mode mutex.
+- Sensor: trigger.cpp icinde state machine:
+    BASELINE (1 s) -> ortam gurultusunden esik turetilir (auto x N modu)
+    ARMED -> 100 ms pencerelerde AC RMS hesabi; 3 ardisik pencere esigi
+             asarsa TRIGGERED'a gec; 5 dk timeout veya disarm ile kapan
+    TRIGGERED -> dosya acilir (/grabYYMMDDHHMMSS.dat), pre-roll buffer
+             kronolojik sirayla yazilir, live data devam eder; 5 ardisik
+             pencere esik altinda ise POST_TAIL'a gec; max_s asilirsa
+             truncated flag set + POST_TAIL'a gec
+    POST_TAIL -> post_s saniye daha kayit, sonra dosya kapanir
+- Firmware: pre-roll ring buffer heap'te (pre_s x hz x 6 byte); 100 ms
+  detection window heap'te (3 x N x float). 1600 Hz x 3 s = 28.8 KB +
+  100 ms x 1600 Hz x 12 byte = 1.9 KB toplam ~31 KB; ESP32 RAM bol.
+- API: yeni endpoint'ler
+    POST /api/trigger_arm    hz, fs, max_s, pre_s, post_s, mode, mult,
+                             abs_thr, ts, meas_point, scan_dir, operator,
+                             notes -> 200 "OK ARMED"
+    POST /api/trigger_disarm -> 200 "OK disarm requested"
+- API: /api/info JSON'a trigger alanlari eklendi:
+    trigState (string), trigBaseline, trigCurrentRms, trigThreshold,
+    trigArmedMs, trigFiredMs
+- Firmware: tum busy check'lere (recording, calibration, OTA, live
+  preview, reset, device-name save) g_trigState != Idle eklendi;
+  state'ler birbirini kilitliyor.
+- Sensor: dosya v4 header'a yazilirken trigger info doldurulur
+  (pre_samples, threshold_used, trig_mode, trig_mult, flags bit0=triggered,
+  bit1=truncated). Header sonradan rewrite ediliyor (samples count + flags).
+- Filename: trigger recording'leri /grabYYMMDDHHMMSS.dat (manuel record
+  /accel... olarak kaliyor); isSafeAccelFile() ikisini de kabul ediyor.
+
+NOT: UI henuz bolunmedi (5D'de gelir). Su anki UI sadece manual recording
+gosteriyor; trigger mode curl/Postman ile test edilebilir:
+  curl -X POST -d "hz=800&fs=2&max_s=60&pre_s=3&post_s=5&mode=0&mult=3
+                   &ts=260425103700&meas_point=test&scan_dir=RADIAL_H" \
+       http://<ip>/api/trigger_arm
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 70.4% (+9876 byte vs V3.9.5).
+- Firmware: APP_VERSION V3.9.6
+)
+---------------------------------------------------------
 Rev. ID    : 5
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:28:41

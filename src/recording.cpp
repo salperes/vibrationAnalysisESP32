@@ -136,20 +136,33 @@ static void recordTask(void * /*arg*/)
     return;
   }
 
-  FileHeaderV3 h{};
+  FileHeaderV4 h{};
   memcpy(h.magic, "LIS2DW12", 8);
-  h.version = 3;
-  h.rate_hz = g_cfg.hz;
+  h.version  = 4;
+  h.rate_hz  = g_cfg.hz;
   h.record_s = g_cfg.sec;
-  h.samples = 0;
-  h.fs_g = fsToByte(cfg.fs);
+  h.samples  = 0;
+  h.fs_g     = fsToByte(cfg.fs);
   h.res_bits = lis.activeResolutionBits();
-  h.q_bits = g_cfg.qBits;
+  h.q_bits   = g_cfg.qBits;
+  h.flags    = 0; // manual recording: triggered=0, truncated=0
   for (int i = 0; i < 3; i++)
   {
     h.cal_offset_g[i] = cal.offset_g[i];
-    h.cal_scale[i] = cal.scale[i];
+    h.cal_scale[i]    = cal.scale[i];
   }
+  // Trigger info: zero (manual recording). trig_mode=0xFF marks N/A.
+  h.pre_samples    = 0;
+  h.threshold_used = 0.0f;
+  h.trig_mode      = 0xFF;
+  h.trig_mult      = 0;
+  // Metadata: copy globals (already null-padded).
+  memcpy(h.serial_no,     g_device_serial,    sizeof(h.serial_no));
+  memcpy(h.device_name,   g_device_name,      sizeof(h.device_name));
+  memcpy(h.meas_point,    g_recMeta.meas_point,    sizeof(h.meas_point));
+  memcpy(h.scan_dir,      g_recMeta.scan_dir,      sizeof(h.scan_dir));
+  memcpy(h.operator_name, g_recMeta.operator_name, sizeof(h.operator_name));
+  memcpy(h.notes,         g_recMeta.notes,         sizeof(h.notes));
 
   if (f.write((uint8_t *)&h, sizeof(h)) != sizeof(h))
   {
@@ -284,7 +297,7 @@ void handleApiStart()
     return;
   }
 
-  const uint16_t allowedSec[] = {15, 30, 45, 60, 75, 90, 120, 180};
+  const uint16_t allowedSec[] = {15, 30, 45, 60, 75, 90, 120};
   bool secOk = false;
   for (auto v : allowedSec)
     if (sec == v)

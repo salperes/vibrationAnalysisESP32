@@ -5,34 +5,45 @@ LIS2DW12 g_liveSensor(Wire, 0x18);
 bool g_liveSensorReady = false;
 
 // ---- File validation ----
-// Accepts only "/accelYYMMDDHHMMSS.dat" or "/accelYYMMDDHHMMSS_NN.dat"
+// Accepts these forms only:
+//   "/accelYYMMDDHHMMSS.dat"        (manual recording)
+//   "/accelYYMMDDHHMMSS_NN.dat"
+//   "/grabYYMMDDHHMMSS.dat"         (triggered/grab recording)
+//   "/grabYYMMDDHHMMSS_NN.dat"
 // where YYMMDDHHMMSS is 12 digits and NN is 2 digits.
 bool isSafeAccelFile(String p)
 {
   if (!p.startsWith("/"))
     p = "/" + p;
-
-  const size_t L = p.length();
-  if (L != 22 && L != 25)
-    return false;
-  if (!p.startsWith("/accel"))
-    return false;
   if (!p.endsWith(".dat"))
     return false;
 
-  // chars 6..17 must be 12 digits (YYMMDDHHMMSS)
-  for (size_t i = 6; i < 18; i++)
+  // Detect prefix and digit-start offset.
+  size_t digitStart;
+  if (p.startsWith("/accel"))
+    digitStart = 6; // "/accel" is 6 chars
+  else if (p.startsWith("/grab"))
+    digitStart = 5; // "/grab" is 5 chars
+  else
+    return false;
+
+  const size_t L = p.length();
+  // Without "_NN": digitStart + 12 + ".dat"(4) = digitStart + 16
+  // With    "_NN": digitStart + 12 + 3 + 4   = digitStart + 19
+  if (L != digitStart + 16 && L != digitStart + 19)
+    return false;
+
+  for (size_t i = digitStart; i < digitStart + 12; i++)
     if (p[i] < '0' || p[i] > '9')
       return false;
 
-  if (L == 25)
+  if (L == digitStart + 19)
   {
-    // "_NN" between timestamp and ".dat"
-    if (p[18] != '_')
+    if (p[digitStart + 12] != '_')
       return false;
-    if (p[19] < '0' || p[19] > '9')
+    if (p[digitStart + 13] < '0' || p[digitStart + 13] > '9')
       return false;
-    if (p[20] < '0' || p[20] > '9')
+    if (p[digitStart + 14] < '0' || p[digitStart + 14] > '9')
       return false;
   }
 
@@ -88,7 +99,90 @@ String makeNewFileNameFromUI(const String &ts12)
   return String();
 }
 
-// ---- Header rewrite ----
+// ---- Header read ----
+bool readParsedHeader(File &f, ParsedHeader &out)
+{
+  memset(&out, 0, sizeof(out));
+
+  // Peek at magic + version (10 bytes) without consuming the rest yet.
+  if (f.size() < 10)
+    return false;
+
+  char magic[8];
+  uint16_t version = 0;
+  f.seek(0, SeekSet);
+  if (f.read((uint8_t *)magic, 8) != 8)
+    return false;
+  if (f.read((uint8_t *)&version, 2) != 2)
+    return false;
+  if (memcmp(magic, "LIS2DW12", 8) != 0)
+    return false;
+
+  f.seek(0, SeekSet);
+
+  if (version == 3)
+  {
+    if (f.size() < (int)sizeof(FileHeaderV3))
+      return false;
+    FileHeaderV3 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
+      return false;
+    out.version      = 3;
+    out.header_bytes = sizeof(FileHeaderV3);
+    out.rate_hz      = h.rate_hz;
+    out.record_s     = h.record_s;
+    out.samples      = h.samples;
+    out.fs_g         = h.fs_g;
+    out.res_bits     = h.res_bits;
+    out.q_bits       = h.q_bits;
+    for (int i = 0; i < 3; i++)
+    {
+      out.cal_offset_g[i] = h.cal_offset_g[i];
+      out.cal_scale[i]    = h.cal_scale[i];
+    }
+    out.trig_mode = 0xFF; // N/A for V3
+    return true;
+  }
+
+  if (version == 4)
+  {
+    if (f.size() < (int)sizeof(FileHeaderV4))
+      return false;
+    FileHeaderV4 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
+      return false;
+    out.version        = 4;
+    out.header_bytes   = sizeof(FileHeaderV4);
+    out.rate_hz        = h.rate_hz;
+    out.record_s       = h.record_s;
+    out.samples        = h.samples;
+    out.fs_g           = h.fs_g;
+    out.res_bits       = h.res_bits;
+    out.q_bits         = h.q_bits;
+    out.flags          = h.flags;
+    for (int i = 0; i < 3; i++)
+    {
+      out.cal_offset_g[i] = h.cal_offset_g[i];
+      out.cal_scale[i]    = h.cal_scale[i];
+    }
+    out.pre_samples    = h.pre_samples;
+    out.threshold_used = h.threshold_used;
+    out.trig_mode      = h.trig_mode;
+    out.trig_mult      = h.trig_mult;
+    memcpy(out.serial_no,     h.serial_no,     sizeof(out.serial_no));
+    memcpy(out.device_name,   h.device_name,   sizeof(out.device_name));
+    memcpy(out.meas_point,    h.meas_point,    sizeof(out.meas_point));
+    memcpy(out.scan_dir,      h.scan_dir,      sizeof(out.scan_dir));
+    memcpy(out.operator_name, h.operator_name, sizeof(out.operator_name));
+    memcpy(out.notes,         h.notes,         sizeof(out.notes));
+    return true;
+  }
+
+  return false; // unsupported version
+}
+
+// ---- Header rewrite (samples count, after recording finalizes) ----
+// Both V3 and V4 keep `samples` as a uint32 at the same byte offset (10..13).
 bool rewriteHeaderSamples(const String &path, uint32_t samplesWritten)
 {
   if (!fileExists(path))
@@ -97,18 +191,45 @@ bool rewriteHeaderSamples(const String &path, uint32_t samplesWritten)
   if (!f)
     return false;
 
-  FileHeaderV3 h{};
-  size_t got = f.read((uint8_t *)&h, sizeof(h));
-  if (got != sizeof(h))
+  // Read version to know which struct layout to use.
+  char magic[8];
+  uint16_t version = 0;
+  if (f.read((uint8_t *)magic, 8) != 8 ||
+      f.read((uint8_t *)&version, 2) != 2)
   {
     f.close();
     return false;
   }
-  h.samples = samplesWritten;
+  if (memcmp(magic, "LIS2DW12", 8) != 0)
+  {
+    f.close();
+    return false;
+  }
+
   f.seek(0, SeekSet);
-  size_t wrote = f.write((uint8_t *)&h, sizeof(h));
+  bool ok = false;
+  if (version == 3)
+  {
+    FileHeaderV3 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) == sizeof(h))
+    {
+      h.samples = samplesWritten;
+      f.seek(0, SeekSet);
+      ok = (f.write((uint8_t *)&h, sizeof(h)) == sizeof(h));
+    }
+  }
+  else if (version == 4)
+  {
+    FileHeaderV4 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) == sizeof(h))
+    {
+      h.samples = samplesWritten;
+      f.seek(0, SeekSet);
+      ok = (f.write((uint8_t *)&h, sizeof(h)) == sizeof(h));
+    }
+  }
   f.close();
-  return wrote == sizeof(h);
+  return ok;
 }
 
 // ---- FullScale conversion ----

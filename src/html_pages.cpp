@@ -217,7 +217,6 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
         <option value="75">75</option>
         <option value="90">90</option>
         <option value="120">120</option>
-        <option value="180">180</option>
       </select>
 
       <div class="small" style="margin-top:10px">

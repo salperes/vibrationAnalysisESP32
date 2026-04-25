@@ -15,6 +15,7 @@ volatile bool g_calibrating6 = false;
 volatile int g_calibStep = -1; // 0..5
 
 RecConfig g_cfg{};
+RecMetadata g_recMeta{};
 volatile uint32_t g_samplesWritten = 0;
 volatile uint32_t g_maxBacklog = 0;
 volatile uint32_t g_elapsedMs = 0;
@@ -41,6 +42,9 @@ volatile bool g_calDirty = true; // calibration changed -> reload NVS
 
 bool g_apMode = false;
 String g_apSsid = "";
+
+char g_device_serial[16] = {0};
+char g_device_name[24]   = {0};
 
 String g_listCache = "[]";
 uint32_t g_listCacheMs = 0;

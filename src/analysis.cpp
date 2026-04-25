@@ -43,29 +43,16 @@ void handleApiAnalyze()
     server.send(500, "text/plain", "Open failed");
     return;
   }
-  if (f.size() < (int)sizeof(FileHeaderV3))
+
+  ParsedHeader h;
+  if (!readParsedHeader(f, h))
   {
     f.close();
-    server.send(400, "text/plain", "Bad file");
+    server.send(400, "text/plain", "Bad header");
     return;
   }
 
-  FileHeaderV3 h{};
-  if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
-  {
-    f.close();
-    server.send(400, "text/plain", "Read header failed");
-    return;
-  }
-
-  if (memcmp(h.magic, "LIS2DW12", 8) != 0)
-  {
-    f.close();
-    server.send(400, "text/plain", "Bad magic");
-    return;
-  }
-
-  const uint32_t headerBytes = sizeof(FileHeaderV3);
+  const uint32_t headerBytes = h.header_bytes;
   const uint32_t sampleBytes = sizeof(Sample6);
   const uint32_t maxPossibleSamples = (uint32_t)((f.size() - headerBytes) / sampleBytes);
   uint32_t n = h.samples;
@@ -257,28 +244,16 @@ void handleApiFFT()
     server.send(500, "text/plain", "Open failed");
     return;
   }
-  if (f.size() < (int)sizeof(FileHeaderV3))
+
+  ParsedHeader h;
+  if (!readParsedHeader(f, h))
   {
     f.close();
-    server.send(400, "text/plain", "Bad file");
+    server.send(400, "text/plain", "Bad header");
     return;
   }
 
-  FileHeaderV3 h{};
-  if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
-  {
-    f.close();
-    server.send(400, "text/plain", "Read header failed");
-    return;
-  }
-  if (memcmp(h.magic, "LIS2DW12", 8) != 0)
-  {
-    f.close();
-    server.send(400, "text/plain", "Bad magic");
-    return;
-  }
-
-  const uint32_t headerBytes = sizeof(FileHeaderV3);
+  const uint32_t headerBytes = h.header_bytes;
   const uint32_t sampleBytes = sizeof(Sample6);
   const uint32_t maxPossibleSamples = (uint32_t)((f.size() - headerBytes) / sampleBytes);
   uint32_t headerSamples = h.samples;

@@ -169,18 +169,11 @@ void handleDownloadCSV()
     server.send(500, "text/plain", "Open failed");
     return;
   }
-  if (f.size() < (int)sizeof(FileHeaderV3))
+  ParsedHeader h;
+  if (!readParsedHeader(f, h))
   {
     f.close();
-    server.send(400, "text/plain", "Bad file");
-    return;
-  }
-
-  FileHeaderV3 h{};
-  if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
-  {
-    f.close();
-    server.send(400, "text/plain", "Read header failed");
+    server.send(400, "text/plain", "Bad header");
     return;
   }
 
@@ -197,9 +190,12 @@ void handleDownloadCSV()
   server.sendHeader("Connection", "close");
   server.send(200);
 
+  // CSV preamble: keep V3 layout for compatibility; emit V4 metadata only
+  // when present (analysis tools can detect by line presence).
   String hdr;
-  hdr.reserve(512);
+  hdr.reserve(1024);
   hdr += "# " + basename + "\n";
+  hdr += "# header_version=" + String(h.version) + "\n";
   hdr += "# rate_hz=" + String(h.rate_hz) + "\n";
   hdr += "# record_s=" + String(h.record_s) + "\n";
   hdr += "# samples=" + String(h.samples) + "\n";
@@ -208,6 +204,25 @@ void handleDownloadCSV()
   hdr += "# q_bits=" + String(h.q_bits) + "\n";
   hdr += "# cal_offset_g=" + String(h.cal_offset_g[0], 6) + "," + String(h.cal_offset_g[1], 6) + "," + String(h.cal_offset_g[2], 6) + "\n";
   hdr += "# cal_scale=" + String(h.cal_scale[0], 6) + "," + String(h.cal_scale[1], 6) + "," + String(h.cal_scale[2], 6) + "\n";
+  if (h.version >= 4)
+  {
+    hdr += "# flags=" + String(h.flags) + "\n";
+    hdr += "# triggered=" + String((h.flags & 0x01) ? 1 : 0) + "\n";
+    hdr += "# truncated=" + String((h.flags & 0x02) ? 1 : 0) + "\n";
+    hdr += "# pre_samples=" + String(h.pre_samples) + "\n";
+    if (h.trig_mode != 0xFF)
+    {
+      hdr += "# trig_mode=" + String(h.trig_mode == 0 ? "auto" : "manual") + "\n";
+      hdr += "# trig_mult=" + String(h.trig_mult) + "\n";
+      hdr += "# threshold_used_mps2=" + String(h.threshold_used, 6) + "\n";
+    }
+    hdr += "# serial_no=" + String(h.serial_no) + "\n";
+    hdr += "# device_name=" + String(h.device_name) + "\n";
+    hdr += "# meas_point=" + String(h.meas_point) + "\n";
+    hdr += "# scan_dir=" + String(h.scan_dir) + "\n";
+    hdr += "# operator=" + String(h.operator_name) + "\n";
+    hdr += "# notes=" + String(h.notes) + "\n";
+  }
   hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
 
   server.sendContent(hdr);

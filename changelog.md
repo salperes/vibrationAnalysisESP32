@@ -1,4 +1,46 @@
 ---------------------------------------------------------
+Rev. ID    : 4
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:21:27
+Rev. Prompt: Faz 5A - file header v4 + parsed header infrastructure (grab mode hazirligi)
+
+Rev. Report: (
+Faz 5A - dosya formati v4'e bump edildi. Trigger info + per-recording
+metadata header'a eklendi; v3 dosyalar geriye donuk uyumlu okunuyor.
+
+- Firmware: FileHeaderV4 (214 byte) tanimlandi (app_state.h). V3 (46 byte)
+  legacy olarak korunuyor, sadece okuma. Yeni eklenen alanlar:
+    flags (bit0 triggered, bit1 truncated)
+    pre_samples, threshold_used, trig_mode, trig_mult
+    serial_no[16], device_name[24], meas_point[24], scan_dir[12],
+    operator_name[16], notes[64]
+  static_assert ile boyutlar derleme aninda dogrulaniyor.
+- Firmware: ParsedHeader version-agnostic struct + readParsedHeader()
+  helper eklendi (sensor_utils). V3 ve V4 tek kapidan akiyor.
+- Firmware: Yeni global'ler:
+    g_recMeta (RecMetadata) - per-recording metadata buffer
+    g_device_serial[16], g_device_name[24] - 5B'de doldurulacak
+- Sensor: rewriteHeaderSamples() artik hem V3 hem V4 dosyalari guncelliyor
+  (versiyona gore branch). Mevcut V3 kayit dosyalarini legal halde tutar.
+- API: handleApiAnalyze + handleApiFFT + CSV download artik
+  readParsedHeader kullaniyor; V3 ve V4 dosyalar ayni kapidan akiyor.
+- API: CSV header preamble V4 dosyalarda metadata satirlarini emit ediyor
+  (# meas_point=, # scan_dir=, # serial_no=, vb.).
+- Sensor: isSafeAccelFile() hem /accel*.dat (manuel) hem /grab*.dat
+  (trigger) kabul ediyor; her ikisi de strict format dogrulamasi.
+- Recording: recordTask V3 yerine V4 yaziyor; manual recording'de
+  trig_mode = 0xFF (N/A), pre_samples = 0.
+- Build: pio run -> SUCCESS, RAM 14.1%, Flash 69.5% (+3964 byte vs V3.9.3).
+- Recording max sec'i UI dropdown'unda 180 -> 120 olarak guncellendi
+  (recording.cpp allowedSec[] ile birlikte; 1600 Hz x 180 s LittleFS'e
+   sigmiyordu).
+
+NOT: Bu commit sadece infrastructure. Trigger mode logic, device identity
+NVS yuklemesi, UI split sonraki fazlarda (5B-5E) gelir.
+
+- Firmware: APP_VERSION V3.9.4
+)
+---------------------------------------------------------
 Rev. ID    : 3
 Rev. Date  : 25.04.2026
 Rev. Time  : 09:55:25

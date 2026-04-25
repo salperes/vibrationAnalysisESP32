@@ -18,7 +18,12 @@ String jsonEscape(const String &s);
 bool isValidYYMMDDHHMMSS(const String &ts);
 String makeNewFileNameFromUI(const String &ts12);
 
-// ---- Header rewrite ----
+// ---- Header read/write ----
+// Reads the file's header (V3 or V4) into a version-agnostic ParsedHeader.
+// Caller does NOT need to seek; this function leaves the file positioned
+// at the first sample (i.e. at offset out.header_bytes). Returns false on
+// I/O error, bad magic, or unsupported version.
+bool readParsedHeader(File &f, ParsedHeader &out);
 bool rewriteHeaderSamples(const String &path, uint32_t samplesWritten);
 
 // ---- FullScale conversion ----

@@ -200,8 +200,8 @@ void handleDownloadCSV()
 
   server.sendContent(hdr);
 
-  const uint32_t dt_ms = (h.rate_hz > 0) ? (1000UL / h.rate_hz) : 1;
-  uint32_t t_ms = 0;
+  const uint32_t dt_us = (h.rate_hz > 0) ? (1000000UL / h.rate_hz) : 1000;
+  uint64_t t_us = 0;
 
   char line[96];
   Sample6 s;
@@ -210,12 +210,15 @@ void handleDownloadCSV()
 
   while (f.read((uint8_t *)&s, sizeof(s)) == sizeof(s))
   {
-    int n = snprintf(line, sizeof(line), "%lu,%d,%d,%d\n",
-                     (unsigned long)t_ms, (int)s.ax, (int)s.ay, (int)s.az);
+    uint32_t ms_int = (uint32_t)(t_us / 1000ULL);
+    uint32_t ms_frac = (uint32_t)(t_us % 1000ULL);
+    int n = snprintf(line, sizeof(line), "%lu.%03lu,%d,%d,%d\n",
+                     (unsigned long)ms_int, (unsigned long)ms_frac,
+                     (int)s.ax, (int)s.ay, (int)s.az);
     if (n > 0)
       chunk += String(line);
 
-    t_ms += dt_ms;
+    t_us += dt_us;
 
     if (chunk.length() > 1800)
     {

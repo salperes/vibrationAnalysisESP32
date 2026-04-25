@@ -218,9 +218,20 @@ void handleApiFFT()
   String path = server.arg("file");
   if (!path.startsWith("/"))
     path = "/" + path;
-  if (!isSafeAccelFile(path) || !LittleFS.exists(path))
+  if (!isSafeAccelFile(path))
   {
-    server.send(404, "text/plain", "Bad file");
+    server.send(400, "text/plain", "Bad file");
+    return;
+  }
+  if (!fileExists(path))
+  {
+    server.send(404, "text/plain", "Not found");
+    return;
+  }
+
+  if (g_recording)
+  {
+    server.send(409, "text/plain", "Recording in progress");
     return;
   }
 
@@ -241,10 +252,40 @@ void handleApiFFT()
   }
 
   File f = LittleFS.open(path, "r");
-  FileHeaderV3 h{};
-  f.read((uint8_t *)&h, sizeof(h));
+  if (!f)
+  {
+    server.send(500, "text/plain", "Open failed");
+    return;
+  }
+  if (f.size() < (int)sizeof(FileHeaderV3))
+  {
+    f.close();
+    server.send(400, "text/plain", "Bad file");
+    return;
+  }
 
-  uint32_t maxSamples = min((uint32_t)FFT_N, h.samples);
+  FileHeaderV3 h{};
+  if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
+  {
+    f.close();
+    server.send(400, "text/plain", "Read header failed");
+    return;
+  }
+  if (memcmp(h.magic, "LIS2DW12", 8) != 0)
+  {
+    f.close();
+    server.send(400, "text/plain", "Bad magic");
+    return;
+  }
+
+  const uint32_t headerBytes = sizeof(FileHeaderV3);
+  const uint32_t sampleBytes = sizeof(Sample6);
+  const uint32_t maxPossibleSamples = (uint32_t)((f.size() - headerBytes) / sampleBytes);
+  uint32_t headerSamples = h.samples;
+  if (headerSamples == 0 || headerSamples > maxPossibleSamples)
+    headerSamples = maxPossibleSamples;
+
+  uint32_t maxSamples = min((uint32_t)FFT_N, headerSamples);
   // Round down to nearest power of 2 (arduinoFFT requires it)
   {
     uint32_t p2 = 1;

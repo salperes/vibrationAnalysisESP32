@@ -92,9 +92,9 @@ void handleApiRealtimeConfig()
     }
   }
 
-  Wire.setClock(1000000);
+  Wire.setClock(400000);
   LIS2DW12 lis(Wire, 0x18);
-  if (!lis.begin(-1, -1, 1000000))
+  if (!lis.begin(-1, -1, 400000))
   {
     if (g_i2cMutex)
       xSemaphoreGive(g_i2cMutex);
@@ -165,11 +165,11 @@ void handleApiLive()
     }
   }
 
-  Wire.setClock(1000000);
+  Wire.setClock(400000);
 
   if (!g_liveSensorReady || g_calDirty)
   {
-    if (!g_liveSensor.begin(-1, -1, 1000000))
+    if (!g_liveSensor.begin(-1, -1, 400000))
     {
       if (g_i2cMutex)
         xSemaphoreGive(g_i2cMutex);

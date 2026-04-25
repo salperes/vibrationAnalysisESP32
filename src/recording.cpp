@@ -66,9 +66,9 @@ static void recordTask(void * /*arg*/)
     }
   }
 
-  Wire.setClock(1000000);
+  Wire.setClock(400000);
   LIS2DW12 lis(Wire, 0x18);
-  if (!lis.begin(-1, -1, 1000000))
+  if (!lis.begin(-1, -1, 400000))
   {
     Serial.println("[REC] Sensor init failed");
     if (g_i2cMutex)

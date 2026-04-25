@@ -69,7 +69,9 @@ static String infoJson()
   s += "\"apMode\":";
   s += (g_apMode ? "true" : "false");
   s += ",";
-  s += "\"apSsid\":\"" + g_apSsid + "\"";
+  s += "\"apSsid\":\"" + g_apSsid + "\",";
+  s += "\"calibrated\":";
+  s += (g_calibPresent ? "true" : "false");
 
   s += "}";
   return s;
@@ -214,18 +216,7 @@ void registerRoutes()
 
   server.on("/api/live", handleApiLive);
   server.on("/api/realtime", HTTP_POST, handleApiRealtimeConfig);
-  server.on("/api/rawmask", HTTP_POST, [](void) {
-    if (server.hasArg("bits"))
-    {
-      uint8_t bits = (uint8_t)server.arg("bits").toInt();
-      setRawMaskBits(bits);
-      server.send(200, "text/plain", "OK");
-    }
-    else
-    {
-      server.send(400, "text/plain", "Missing bits");
-    }
-  });
+  server.on("/api/rawmask", HTTP_POST, handleApiRawMask);
 
   server.on("/api/reset", HTTP_POST, handleApiReset);
   server.on("/update", HTTP_GET, handleUpdateGet);

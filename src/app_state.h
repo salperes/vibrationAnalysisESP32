@@ -92,3 +92,7 @@ extern uint8_t g_rt_hist_idx;
 
 // Bitmasking of raw sensor LSBs: 0=off, 2,3,4 bits
 extern uint8_t g_rawMaskBits;
+
+// True when a valid calibration blob was found in NVS (set at boot and after
+// successful save). Read by /api/info to inform the UI.
+extern volatile bool g_calibPresent;

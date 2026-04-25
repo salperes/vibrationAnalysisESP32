@@ -36,3 +36,8 @@ float rmsFromSumSq(double sumSq, uint32_t n);
 
 // ---- Live preview state ----
 void resetLivePreviewState();
+
+// ---- Calibration ----
+// Reads NVS calibration blob into g_liveSensor and updates g_calibPresent.
+// Safe to call before sensor I2C init (loadCalibrationNVS uses Preferences only).
+void loadCalibrationAtBoot();

@@ -256,9 +256,9 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
       <div class="small" style="margin-top:8px">
         <label><input type="checkbox" id="chkRealtime" onchange="toggleRealtime(this.checked)"> Real-time ISO 20816 (mag only)</label>
         <select id="maskBits" onchange="setMaskBits()">
-          <option value="0">Mask: off</option>
+          <option value="0" selected>Mask: off</option>
           <option value="2">Mask: 2-bit</option>
-          <option value="3" selected>Mask: 3-bit</option>
+          <option value="3">Mask: 3-bit</option>
           <option value="4">Mask: 4-bit</option>
         </select>
       </div>
@@ -318,7 +318,7 @@ let azBuf = new Array(CHART_N).fill(0);
 let bufIdx = 0;
 let bufCount = 0;
 let realtimeMode = false;
-let maskBits = 3;
+let maskBits = 0;
 
 function pushSample(ax, ay, az){
   axBuf[bufIdx] = ax;
@@ -518,8 +518,13 @@ async function refreshInfo(){
     if (j.calibratingStatic) flags.push("CAL(STATIC)");
     if (j.calibrating6) flags.push("CAL(6POS:" + escHtml(j.calibPose) + ")");
 
+    const calBadge = j.calibrated
+      ? "<span class='ok'>CAL</span>"
+      : "<span class='warn'>UNCAL</span>";
+
     st.innerHTML =
       (j.recording ? "<span class='warn'>RECORDING</span>" : "<span class='ok'>IDLE</span>")
+      + " | " + calBadge
       + " | mode: " + escHtml(j.mode || "-")
       + " | currentFile: " + escHtml(j.currentFile || "-")
       + " | samples: " + j.samples

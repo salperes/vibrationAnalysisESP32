@@ -52,6 +52,14 @@ static void recordTask(void * /*arg*/)
 
   String ts = g_uiTimestamp;
   String path = makeNewFileNameFromUI(ts);
+  if (path.length() == 0)
+  {
+    Serial.println("[REC] Could not allocate unique filename");
+    g_recording = false;
+    g_recTask = nullptr;
+    vTaskDelete(nullptr);
+    return;
+  }
   g_currentFile = path;
 
   if (g_i2cMutex)
@@ -111,7 +119,10 @@ static void recordTask(void * /*arg*/)
   }
 
   lis.setOutputQuantization(g_cfg.qBits);
-  lis.loadCalibrationNVS("lis2dw12", "cal");
+  if (!lis.loadCalibrationNVS("lis2dw12", "cal"))
+  {
+    Serial.println("[REC] No calibration in NVS; recording uncalibrated");
+  }
   auto cal = lis.getCalibration();
 
   File f = LittleFS.open(path, "w");

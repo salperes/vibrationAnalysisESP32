@@ -92,6 +92,18 @@ static String fsInfoJson()
 void handleApiList() { server.send(200, "application/json", listFilesJsonCached()); }
 void handleApiFsInfo() { server.send(200, "application/json", fsInfoJson()); }
 
+void handleApiRawMask()
+{
+  if (!server.hasArg("bits"))
+  {
+    server.send(400, "text/plain", "Missing bits");
+    return;
+  }
+  uint8_t bits = (uint8_t)server.arg("bits").toInt();
+  setRawMaskBits(bits);
+  server.send(200, "text/plain", "OK");
+}
+
 void handleDownload()
 {
   if (!server.hasArg("file"))

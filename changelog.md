@@ -1,4 +1,32 @@
 ---------------------------------------------------------
+Rev. ID    : 2
+Rev. Date  : 25.04.2026
+Rev. Time  : 09:45:12
+Rev. Prompt: Faz 3 (UX/davranis duzeltmeleri) uygulamasi
+
+Rev. Report: (
+Faz 3 - kullanici davranisi/tutarlilik iyilestirmeleri.
+
+- Firmware: g_rawMaskBits default 3 -> 0; LSB maskeleme artik kullanici
+  acikca secmeden uygulanmiyor. UI dropdown ve JS state default'u da senkron.
+- Sensor: isSafeAccelFile() siki dogrulama. Yalniz "/accelYYMMDDHHMMSS.dat"
+  veya "/accelYYMMDDHHMMSS_NN.dat" formatinda kabul; "/accel.dat",
+  "/accelABC.dat" gibi yanlis isimler reddediliyor.
+- Firmware: makeNewFileNameFromUI() 99 ayni-saniye cakismasinda artik
+  millis() fallback'i yerine bos string donuyor; recordTask bunu yakalayip
+  temiz cikiyor (UI'da bozuk dosya adi olusmaz).
+- API: /api/rawmask lambda -> handleApiRawMask() ayri fonksiyon
+  (file_handlers.cpp/h); diger handler'larla stil tutarli.
+- Sensor + API: Calibration NVS blob'u boot'ta yukleniyor (loadCalibrationAtBoot),
+  g_calibPresent global flag'i set ediliyor, /api/info JSON'a "calibrated"
+  alani eklendi. recordTask NVS yukleme basarisizliginda log basiyor.
+- Web UI: Status barina "CAL"/"UNCAL" rozeti eklendi; uncalibrated cihaz
+  bariz sekilde isaretleniyor.
+- Firmware: APP_VERSION V3.9.2
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 69.0% (+508 byte vs V3.9.1).
+)
+---------------------------------------------------------
 Rev. ID    : 1
 Rev. Date  : 25.04.2026
 Rev. Time  : 09:37:30

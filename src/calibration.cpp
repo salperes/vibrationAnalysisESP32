@@ -41,6 +41,7 @@ static void calibrateStaticTask(void * /*arg*/)
     {
       lis.saveCalibrationNVS("lis2dw12", "cal");
       g_calDirty = true;
+      g_calibPresent = true;
     }
   }
 
@@ -113,6 +114,7 @@ static void calibrate6PosTask(void * /*arg*/)
   lis.calibrate6PositionFromAverages(g_calibAvg);
   lis.saveCalibrationNVS("lis2dw12", "cal");
   g_calDirty = true;
+  g_calibPresent = true;
 
   if (g_i2cMutex)
     xSemaphoreGive(g_i2cMutex);

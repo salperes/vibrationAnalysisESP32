@@ -3,7 +3,7 @@
 // Build info can be overridden via build flags:
 // -D APP_VERSION="\"V3.1\"" -D BUILD_HASH="\"a1b2c3d\""
 #ifndef APP_VERSION
-#define APP_VERSION "V3.9.1"
+#define APP_VERSION "V3.9.2"
 #endif
 
 #ifndef BUILD_HASH

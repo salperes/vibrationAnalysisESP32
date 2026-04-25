@@ -12,3 +12,4 @@ void handleApiFsInfo();
 void handleDownload();
 void handleDownloadCSV();
 void handleApiDelete();
+void handleApiRawMask();

@@ -52,4 +52,6 @@ float g_rt_hist_vel_mmps[10] = {0};
 float g_rt_hist_disp_mm[10] = {0};
 uint8_t g_rt_hist_count = 0;
 uint8_t g_rt_hist_idx = 0;
-uint8_t g_rawMaskBits = 3; // default 3-bit mask for RT/live
+uint8_t g_rawMaskBits = 0; // default: no LSB masking (user opts in via UI)
+
+volatile bool g_calibPresent = false;

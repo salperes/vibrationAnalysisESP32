@@ -5,18 +5,37 @@ LIS2DW12 g_liveSensor(Wire, 0x18);
 bool g_liveSensorReady = false;
 
 // ---- File validation ----
+// Accepts only "/accelYYMMDDHHMMSS.dat" or "/accelYYMMDDHHMMSS_NN.dat"
+// where YYMMDDHHMMSS is 12 digits and NN is 2 digits.
 bool isSafeAccelFile(String p)
 {
   if (!p.startsWith("/"))
     p = "/" + p;
+
+  const size_t L = p.length();
+  if (L != 22 && L != 25)
+    return false;
   if (!p.startsWith("/accel"))
     return false;
   if (!p.endsWith(".dat"))
     return false;
-  if (p.indexOf("..") >= 0)
-    return false;
-  if (p.indexOf("//") >= 0)
-    return false;
+
+  // chars 6..17 must be 12 digits (YYMMDDHHMMSS)
+  for (size_t i = 6; i < 18; i++)
+    if (p[i] < '0' || p[i] > '9')
+      return false;
+
+  if (L == 25)
+  {
+    // "_NN" between timestamp and ".dat"
+    if (p[18] != '_')
+      return false;
+    if (p[19] < '0' || p[19] > '9')
+      return false;
+    if (p[20] < '0' || p[20] > '9')
+      return false;
+  }
+
   return true;
 }
 
@@ -65,7 +84,8 @@ String makeNewFileNameFromUI(const String &ts12)
     if (!LittleFS.exists(p2))
       return p2;
   }
-  return base + "_" + String(millis()) + ".dat";
+  // 100 collisions in the same second is unreachable in practice; signal failure.
+  return String();
 }
 
 // ---- Header rewrite ----
@@ -181,6 +201,31 @@ float applyCal1(float g, float offset, float scale)
 float rmsFromSumSq(double sumSq, uint32_t n)
 {
   return (n > 0) ? sqrtf((float)(sumSq / (double)n)) : 0.0f;
+}
+
+// ---- Calibration boot-load ----
+void loadCalibrationAtBoot()
+{
+  if (g_liveSensor.loadCalibrationNVS("lis2dw12", "cal"))
+  {
+    auto cal = g_liveSensor.getCalibration();
+    g_calibPresent = cal.enabled;
+    if (cal.enabled)
+    {
+      Serial.printf("[CAL] Loaded from NVS: off=[%.4f,%.4f,%.4f] sc=[%.4f,%.4f,%.4f]\n",
+                    cal.offset_g[0], cal.offset_g[1], cal.offset_g[2],
+                    cal.scale[0], cal.scale[1], cal.scale[2]);
+    }
+    else
+    {
+      Serial.println("[CAL] NVS blob found but enabled=false");
+    }
+  }
+  else
+  {
+    g_calibPresent = false;
+    Serial.println("[CAL] No calibration in NVS (run /api/calibrate_static or /api/calibrate6)");
+  }
 }
 
 // ---- Live preview state ----

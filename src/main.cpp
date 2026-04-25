@@ -5,6 +5,7 @@
 
 #include "api_handlers.h"
 #include "file_handlers.h"
+#include "sensor_utils.h"
 #include "app_state.h"
 #include "config.h"
 
@@ -85,6 +86,8 @@ void setup()
       delay(1000);
   }
   Serial.println("[BOOT] I2C + mutex ready");
+
+  loadCalibrationAtBoot();
 
   startWiFiOrAP();
   Serial.println("[BOOT] WiFi/AP init done");

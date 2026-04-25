@@ -132,17 +132,21 @@ loadVersion();
 
 )HTML";
 
-const char INDEX_HTML[] PROGMEM = R"HTML(
+const char LIVE_HTML[] PROGMEM = R"HTML(
 
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>ESP32 LIS2DW12 Recorder</title>
+  <title>accMeter2 - Live View</title>
   <style>
     body{font-family:system-ui,Segoe UI,Roboto,Arial;max-width:1040px;margin:18px auto;padding:0 12px}
     h1{font-size:20px;margin:8px 0 14px}
+    nav.top{display:flex;gap:14px;margin:0 0 14px;font-size:14px}
+    nav.top a{color:#36c;text-decoration:none;padding:6px 10px;border-radius:8px}
+    nav.top a:hover{background:#eef}
+    nav.top a.active{background:#36c;color:#fff}
     .row{display:flex;flex-wrap:wrap;gap:12px;align-items:stretch}
     .card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1;min-width:300px}
     .card h2{font-size:14px;margin:0 0 10px;color:#333}
@@ -166,7 +170,12 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   </style>
 </head>
 <body>
-  <h1>ESP32 LIS2DW12 Recorder</h1>
+  <h1>accMeter2 <span class="small mono" id="ver">-</span></h1>
+  <nav class="top">
+    <a href="/">Grab Mode</a>
+    <a class="active">Live View</a>
+    <a href="/update">Firmware Update</a>
+  </nav>
 
   <div class="card top">
     <h2>Info</h2>
@@ -867,11 +876,19 @@ Z: min=${j.min[2].toFixed(4)} g  max=${j.max[2].toFixed(4)} g  rms=${j.rms[2].to
 }
 
 
+async function loadVersion(){
+  try{
+    const j = await getJson('/api/version');
+    document.getElementById('ver').textContent = j.version + ' ' + j.hash;
+  }catch(e){}
+}
+
 setInterval(refreshInfo, 1000);
 setInterval(()=>refreshFiles(), 2000);
 setInterval(refreshFsInfo, 3000);
 setInterval(refreshLive, 1000);
 
+loadVersion();
 refreshInfo(); refreshFiles(); refreshFsInfo(); refreshLive(); drawChart();
 </script>
 </body>
@@ -880,5 +897,375 @@ refreshInfo(); refreshFiles(); refreshFsInfo(); refreshLive(); drawChart();
 )HTML";
 
 
+// ============================================================================
+// GRAB MODE PAGE — default landing. Captures measurement metadata, configures
+// trigger thresholds, arms the device for motion-triggered recording.
+// ============================================================================
+const char GRAB_HTML[] PROGMEM = R"HTML(
 
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>accMeter2 - Grab Mode</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;max-width:920px;margin:18px auto;padding:0 12px;color:#111}
+    h1{font-size:20px;margin:8px 0 14px}
+    h2{font-size:14px;margin:0 0 10px;color:#333}
+    nav.top{display:flex;gap:14px;margin:0 0 14px;font-size:14px}
+    nav.top a{color:#36c;text-decoration:none;padding:6px 10px;border-radius:8px}
+    nav.top a:hover{background:#eef}
+    nav.top a.active{background:#36c;color:#fff}
+    .card{border:1px solid #ddd;border-radius:12px;padding:14px;margin-bottom:12px;background:#fff}
+    label{font-size:12px;color:#444;display:block;margin-bottom:4px}
+    input,select,button{font-size:14px;padding:8px 10px;border-radius:10px;border:1px solid #bbb;background:#fff}
+    button{cursor:pointer}
+    button.primary{background:#36c;color:#fff;border-color:#36c;font-weight:600;padding:10px 18px}
+    button.primary:disabled{background:#aaa;border-color:#aaa;cursor:not-allowed}
+    button.danger{background:#c33;color:#fff;border-color:#c33}
+    .grid{display:grid;grid-template-columns:160px 1fr;gap:8px 12px;align-items:center}
+    .grid input,.grid select{width:100%;box-sizing:border-box}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .small{font-size:12px;color:#666}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .ok{color:#0a7;font-weight:600}
+    .warn{color:#c70;font-weight:600}
+    .bad{color:#c00;font-weight:600}
+    .badge{padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600}
+    .badge.cal{background:#e7f7ee;color:#0a7;border:1px solid #0a7}
+    .badge.uncal{background:#fff4e0;color:#c70;border:1px solid #c70}
+    .stateBig{font-size:22px;font-weight:700;letter-spacing:0.5px}
+    .stateIdle{color:#666}
+    .stateArmed{color:#c70}
+    .stateTrig{color:#c33}
+    .statePost{color:#36c}
+    .stateDone{color:#0a7}
+    pre{background:#fafafa;border:1px solid #eee;padding:10px;border-radius:10px;font-size:12px;margin:8px 0 0}
+    .req::after{content:" *";color:#c33}
+    .toast{position:fixed;right:16px;bottom:16px;background:#111;color:#fff;padding:12px 14px;border-radius:12px;opacity:0;transform:translateY(10px);transition:all .25s ease;pointer-events:none;max-width:520px;font-size:13px}
+    .toast.show{opacity:0.95;transform:translateY(0)}
+    .row-thr{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px}
+    .row-thr input[type=number]{width:80px}
+    @media(max-width:600px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <h1>accMeter2 <span class="small mono" id="ver">-</span></h1>
+  <nav class="top">
+    <a class="active">Grab Mode</a>
+    <a href="/live">Live View</a>
+    <a href="/update">Firmware Update</a>
+  </nav>
 
+  <div class="card">
+    <h2>Device</h2>
+    <div class="grid">
+      <label>Serial</label>
+      <span id="serial" class="mono small">-</span>
+
+      <label>Name</label>
+      <span class="row">
+        <input id="devName" placeholder="accMeter-XXXXXX" maxlength="23" style="flex:1;min-width:160px"/>
+        <button onclick="saveName()">SAVE</button>
+      </span>
+
+      <label>Calibration</label>
+      <span id="calBadge" class="badge uncal">UNCAL</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Measurement Metadata</h2>
+    <div class="grid">
+      <label>Date / Time</label>
+      <span id="ts" class="mono small">auto from browser</span>
+
+      <label class="req">Measurement point</label>
+      <input id="measPoint" placeholder="e.g. Motor-DE" maxlength="23" required/>
+
+      <label class="req">Scan direction</label>
+      <select id="scanDir">
+        <option value="RADIAL_H">Radial - Horizontal</option>
+        <option value="RADIAL_V">Radial - Vertical</option>
+        <option value="AXIAL">Axial</option>
+      </select>
+
+      <label>Operator</label>
+      <input id="operator" placeholder="(optional)" maxlength="15"/>
+
+      <label>Notes</label>
+      <input id="notes" placeholder="(optional)" maxlength="63"/>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Acquisition Settings</h2>
+    <div class="grid">
+      <label>Sampling rate</label>
+      <select id="hz">
+        <option value="100">100 Hz</option>
+        <option value="200">200 Hz</option>
+        <option value="400">400 Hz</option>
+        <option value="800" selected>800 Hz</option>
+        <option value="1600">1600 Hz</option>
+      </select>
+
+      <label>G range</label>
+      <select id="fs">
+        <option value="2" selected>+/- 2 g</option>
+        <option value="4">+/- 4 g</option>
+        <option value="8">+/- 8 g</option>
+        <option value="16">+/- 16 g</option>
+      </select>
+
+      <label>Max duration</label>
+      <select id="maxS">
+        <option value="15">15 s</option>
+        <option value="30">30 s</option>
+        <option value="45">45 s</option>
+        <option value="60" selected>60 s</option>
+        <option value="90">90 s</option>
+        <option value="120">120 s (max)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Trigger</h2>
+    <div class="grid">
+      <label>Pre-roll</label>
+      <span class="row">
+        <input id="preS" type="number" min="1" max="10" value="3" style="width:80px"/> s
+      </span>
+      <label>Post-roll</label>
+      <span class="row">
+        <input id="postS" type="number" min="1" max="30" value="5" style="width:80px"/> s
+      </span>
+      <label>Threshold</label>
+      <div>
+        <div class="row-thr">
+          <label><input type="radio" name="thrMode" value="0" checked onchange="updateThrMode()"/>
+          Auto baseline x <input id="mult" type="number" min="2" max="20" value="3"/></label>
+        </div>
+        <div class="row-thr" style="margin-top:6px">
+          <label><input type="radio" name="thrMode" value="1" onchange="updateThrMode()"/>
+          Manual: <input id="manThr" type="number" min="0.01" max="100" step="0.01" value="0.50"/> m/s^2</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="gap:14px">
+      <button id="armBtn" class="primary" onclick="armGrab()">START GRAB (ARM)</button>
+      <button id="disarmBtn" class="danger" onclick="disarmGrab()" disabled>DISARM</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div id="stateLabel" class="stateBig stateIdle">IDLE</div>
+    <pre id="stateDetail">Fill in the metadata above and press ARM to start.</pre>
+  </div>
+
+  <div class="card" id="lastFileCard" style="display:none">
+    <h2>Last saved</h2>
+    <div id="lastFile" class="mono small"></div>
+    <div style="margin-top:8px"><a href="/live">Open Live View to analyze -&gt;</a></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+<script>
+async function getJson(p){
+  const r = await fetch(p, {cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.json();
+}
+async function postText(p, params){
+  const body = params ? Object.entries(params)
+    .map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v))
+    .join('&') : '';
+  const r = await fetch(p, {
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body, cache:'no-store'
+  });
+  return {ok:r.ok, text: await r.text()};
+}
+let _toastTimer = null;
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  if(_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(()=>{t.classList.remove('show'); _toastTimer=null;}, 2600);
+}
+
+function tsYYMMDDHHMMSS(){
+  const d = new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const MM = String(d.getMonth()+1).padStart(2,'0');
+  const DD = String(d.getDate()).padStart(2,'0');
+  const HH = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  return yy+MM+DD+HH+mm+ss;
+}
+function nowPretty(){
+  const d = new Date();
+  return d.toLocaleString();
+}
+
+async function loadVersion(){
+  try{
+    const j = await getJson('/api/version');
+    document.getElementById('ver').textContent = j.version + ' ' + j.hash;
+  }catch(e){}
+}
+
+let _devLoaded = false;
+async function loadDevice(){
+  try{
+    const j = await getJson('/api/device');
+    document.getElementById('serial').textContent = j.serial || '-';
+    if(!_devLoaded){
+      document.getElementById('devName').value = j.name || '';
+      _devLoaded = true;
+    }
+  }catch(e){ console.warn('loadDevice', e); }
+}
+async function saveName(){
+  const name = document.getElementById('devName').value.trim();
+  if(!name){ alert('Name is required'); return; }
+  if(name.length > 23){ alert('Max 23 chars'); return; }
+  const r = await postText('/api/device', {name});
+  if(!r.ok){ alert('Save failed: ' + r.text); return; }
+  toast('Device name saved');
+}
+
+function updateThrMode(){
+  const mode = document.querySelector('input[name=thrMode]:checked').value;
+  document.getElementById('mult').disabled   = (mode === '1');
+  document.getElementById('manThr').disabled = (mode === '0');
+}
+
+function setStateUI(state, j){
+  const lbl = document.getElementById('stateLabel');
+  const det = document.getElementById('stateDetail');
+  lbl.classList.remove('stateIdle','stateArmed','stateTrig','statePost','stateDone');
+  let txt = '';
+  switch(state){
+    case 'Idle':
+      lbl.textContent = 'IDLE';
+      lbl.classList.add('stateIdle');
+      txt = 'Fill in the metadata above and press ARM to start.';
+      break;
+    case 'Armed': {
+      lbl.textContent = 'ARMED — waiting for motion';
+      lbl.classList.add('stateArmed');
+      const armed = ((j.trigArmedMs||0)/1000).toFixed(1);
+      const baseline = (j.trigBaseline||0).toFixed(4);
+      const thr = (j.trigThreshold||0).toFixed(4);
+      const cur = (j.trigCurrentRms||0).toFixed(4);
+      txt = `armed for ${armed} s\nbaseline: ${baseline} m/s^2\nthreshold: ${thr} m/s^2\ncurrent window RMS: ${cur} m/s^2`;
+      break;
+    }
+    case 'Triggered': {
+      lbl.textContent = 'TRIGGERED — recording';
+      lbl.classList.add('stateTrig');
+      const fired = ((j.trigFiredMs||0)/1000).toFixed(1);
+      const cur = (j.trigCurrentRms||0).toFixed(4);
+      const thr = (j.trigThreshold||0).toFixed(4);
+      const samples = j.samples || 0;
+      txt = `recording for ${fired} s\nsamples written: ${samples}\ncurrent RMS: ${cur} m/s^2 (threshold ${thr})`;
+      break;
+    }
+    case 'PostTail': {
+      lbl.textContent = 'POST-TAIL — finalizing';
+      lbl.classList.add('statePost');
+      const fired = ((j.trigFiredMs||0)/1000).toFixed(1);
+      const samples = j.samples || 0;
+      txt = `total ${fired} s elapsed since trigger\nsamples written: ${samples}\nfinishing tail recording...`;
+      break;
+    }
+  }
+  det.textContent = txt;
+}
+
+let _lastTrigState = 'Idle';
+let _lastFile = '';
+async function refreshInfo(){
+  try{
+    const j = await getJson('/api/info');
+    const state = j.trigState || 'Idle';
+    setStateUI(state, j);
+
+    document.getElementById('calBadge').textContent = j.calibrated ? 'CAL' : 'UNCAL';
+    document.getElementById('calBadge').className   = 'badge ' + (j.calibrated ? 'cal' : 'uncal');
+
+    document.getElementById('armBtn').disabled    = (state !== 'Idle');
+    document.getElementById('disarmBtn').disabled = (state === 'Idle');
+
+    // Detect transition Triggered/PostTail -> Idle (capture finished)
+    if(_lastTrigState !== 'Idle' && state === 'Idle' && j.currentFile){
+      document.getElementById('lastFileCard').style.display = '';
+      document.getElementById('lastFile').textContent =
+        `${j.currentFile}  (samples=${j.samples})`;
+      toast('Saved: ' + j.currentFile);
+    }
+    _lastTrigState = state;
+
+    // Update timestamp display while idle
+    if(state === 'Idle'){
+      document.getElementById('ts').textContent = nowPretty() + ' (will be auto-set on ARM)';
+    }
+  }catch(e){ console.warn('refreshInfo', e); }
+}
+
+async function armGrab(){
+  const measPoint = document.getElementById('measPoint').value.trim();
+  const scanDir   = document.getElementById('scanDir').value;
+  if(!measPoint){ alert('Measurement point is required'); return; }
+  if(!scanDir){   alert('Scan direction is required');    return; }
+
+  const params = {
+    hz:    document.getElementById('hz').value,
+    fs:    document.getElementById('fs').value,
+    max_s: document.getElementById('maxS').value,
+    pre_s: document.getElementById('preS').value,
+    post_s:document.getElementById('postS').value,
+    mode:  document.querySelector('input[name=thrMode]:checked').value,
+    mult:  document.getElementById('mult').value,
+    abs_thr: document.getElementById('manThr').value,
+    ts:    tsYYMMDDHHMMSS(),
+    meas_point: measPoint,
+    scan_dir:   scanDir,
+    operator:   document.getElementById('operator').value.trim(),
+    notes:      document.getElementById('notes').value.trim()
+  };
+
+  const r = await postText('/api/trigger_arm', params);
+  if(!r.ok){ alert('Arm failed: ' + r.text); return; }
+  document.getElementById('lastFileCard').style.display = 'none';
+  toast('ARMED');
+}
+
+async function disarmGrab(){
+  if(!confirm('Disarm? Active recording (if any) will close cleanly.')) return;
+  const r = await postText('/api/trigger_disarm');
+  if(!r.ok){ alert('Disarm failed: ' + r.text); return; }
+  toast('Disarm requested');
+}
+
+setInterval(refreshInfo, 1000);
+loadVersion();
+loadDevice();
+refreshInfo();
+updateThrMode();
+</script>
+</body>
+</html>
+
+)HTML";

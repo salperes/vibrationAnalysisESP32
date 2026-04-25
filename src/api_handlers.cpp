@@ -143,7 +143,8 @@ static void handleApiDevicePost()
 }
 
 // ======================= Simple handlers =======================
-static void handleRoot() { server.send(200, "text/html", INDEX_HTML); }
+static void handleRoot() { server.send(200, "text/html", GRAB_HTML); }
+static void handleLive() { server.send(200, "text/html", LIVE_HTML); }
 static void handlePing() { server.send(200, "text/plain", "PONG"); }
 static void handleApiInfo() { server.send(200, "application/json", infoJson()); }
 static void handleApiVersion() { server.send(200, "application/json", versionJson()); }
@@ -263,6 +264,7 @@ static void handleUpdateUpload()
 void registerRoutes()
 {
   server.on("/", handleRoot);
+  server.on("/live", handleLive);
   server.on("/ping", handlePing);
 
   server.on("/api/info", handleApiInfo);

@@ -1,4 +1,48 @@
 ---------------------------------------------------------
+Rev. ID    : 7
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:41:29
+Rev. Prompt: Faz 5D - UI bolunmesi (Grab Mode default + Live View ikinci sayfa)
+
+Rev. Report: (
+Web arayuzu iki ayri sayfaya bolundu. Default sayfa "Grab Mode" - olcum
+metadata'si girip motion-triggered kayit baslatma odakli. Ikinci sayfa
+"Live View" - mevcut canli onizleme + dosya analizi + kalibrasyon vb.
+
+- Web UI: GRAB_HTML yeni sayfa (~14 KB), default route "/" buraya gider
+    Bolumler:
+    - Device: serial (auto), name (NVS'de persisted, inline kaydet),
+      kalibrasyon rozeti (CAL/UNCAL)
+    - Measurement Metadata: tarih/saat (auto from browser), olcum noktasi
+      (zorunlu), tarama yonu (Radial-H/Radial-V/Axial), operator (opsiyonel),
+      notes (opsiyonel)
+    - Acquisition Settings: hz (100..1600), fs (2/4/8/16 g), max duration
+      (15..120 s)
+    - Trigger: pre-roll (1..10 s), post-roll (1..30 s), threshold mode
+      (Auto baseline x N veya Manual m/s^2)
+    - Action: START GRAB (ARM), DISARM
+    - Status: state metni (IDLE/ARMED/TRIGGERED/POST-TAIL) + canli detay
+      (baseline, threshold, current RMS, elapsed)
+    - Last saved: kayit bitince dosya adi + Live View linki
+- Web UI: INDEX_HTML -> LIVE_HTML olarak rename edildi; uste navigation bar
+  eklendi (Grab Mode | Live View | Firmware Update). Versiyon banner'da
+  /api/version'dan cekiliyor.
+- API: /api/info polling Grab Mode'da 1s interval; trigger durumu canli
+  takip ediliyor. Idle'a donusunde otomatik "Saved: ..." toast.
+- Routing: "/" -> GRAB_HTML, "/live" -> LIVE_HTML, "/update" -> UPDATE_HTML
+  (degismedi).
+- HTML form -> /api/trigger_arm: tum params (hz, fs, max_s, pre_s, post_s,
+  mode, mult, abs_thr, ts, meas_point, scan_dir, operator, notes).
+  Browser-side validation: meas_point ve scan_dir zorunlu.
+
+NOT: Live View'da manuel record icin metadata input henuz yok (5E polish'te
+gelir). Live View'daki manuel /api/start cagrisi su an metadata gondermiyor;
+g_recMeta bos string'lerle dolduruluyor.
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 71.5% (+14272 byte vs V3.9.6).
+- Firmware: APP_VERSION V3.9.7
+)
+---------------------------------------------------------
 Rev. ID    : 6
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:37:02

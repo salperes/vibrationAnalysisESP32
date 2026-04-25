@@ -1,4 +1,58 @@
 ---------------------------------------------------------
+Rev. ID    : 12
+Rev. Date  : 25.04.2026
+Rev. Time  : 11:48:10
+Rev. Prompt: live mode'da gurultu yuzunden RMS 0,05m/s2 + 0,495mm/s gozukuyor; nasil eleminre ederiz
+
+Rev. Report: (
+LIS2DW12 sensor gurultu tabani (~90 ug/sqrt(Hz)) durağan cihazda bile RMS
+hesabini ~0.05 m/s² acc + ~0.5 mm/s vel'e cikariyor (250 ms penceresinde
+white noise integrasyonu rastgele yuruyus uretir). Cozum: kullanici "ZERO"
+butonuyla mevcut gurultu tabanini olcup NVS'ye kaydediyor; sonraki
+RMS'lerden quadrature olarak cikariliyor. Ek olarak LPF cutoff dropdown
+ile gurultu daha agresif filtrelenebilir.
+
+- Firmware: yeni global'ler (app_state.h/cpp):
+    g_live_zero_active (volatile bool)
+    g_live_noise_acc_mps2[3], g_live_noise_vel_mmps[3], g_live_noise_disp_mm[3]
+    g_live_noise_mag_acc, g_live_noise_mag_vel_mmps, g_live_noise_mag_disp_mm
+- Sensor (sensor_utils): saveLiveZeroNVS / clearLiveZeroNVS / loadLiveZeroAtBoot
+    Preferences NVS'de namespace="livezero" key="blob"; CRC32 ile
+    bozuk yazma korunmasi. main.cpp setup'ta loadLiveZeroAtBoot() cagriliyor.
+- API: yeni endpoint'ler
+    POST /api/live_zero        -> 250 ms taze olcum, RMS'leri noise globals
+                                  olarak kaydeder, NVS'ye yazar, aktif eder
+    POST /api/live_zero_clear  -> noise globals + NVS temizler, aktiflik kapanir
+- API: handleApiLive RMS hesabindan sonra g_live_zero_active ise quadrature
+    subtraction uyguluyor:
+      out_rms = sqrt(max(0, raw_rms² - noise_rms²))
+    Hem per-axis hem magnitude icin.
+- API: cutoff degisirse (?fc=... query param) g_live_zero_active otomatik
+    deaktive edilir (eski floor farkli LPF altinda alinmisti, gecersiz).
+    Hz/G degisirse (handleApiLiveConfig) ayni sekilde deaktive eder.
+- API: /api/info JSON yeni alanlar:
+    "liveFc"           - su anki LPF cutoff (Hz)
+    "liveZeroActive"   - quadrature subtraction aktif mi
+    "liveZeroAcc"      - acc magnitude floor (m/s²)
+    "liveZeroVel"      - vel magnitude floor (mm/s)
+    "liveZeroDisp"     - disp magnitude floor (mm)
+
+- Web UI (Live tab):
+    Sensor settings karti: yeni "LPF cutoff" dropdown (5/10/20/50/100/200/400 Hz).
+      refreshLive her cagrida ?fc=<secim> gonderir; cutoff persistent kalir.
+    Yeni "Noise floor (zero)" karti: ZERO buton + CLEAR buton +
+      durum rozeti (zero ON / no zero) + altta floor degerleri (debug).
+    /api/info polling rozeti ve floor degerlerini guncelliyor.
+    Hz/G degisince toast "Live: ... (zero cleared)" uyarisi.
+
+NOT: Zero degerleri NVS'de kalici (cihaz reset sonra da aktif). Cihaz
+farkli ortama tasinirsa kullanici tekrar ZERO basmali; hatali kullanim
+durumunda CLEAR ile sifirlama her zaman mumkun.
+
+Build: pio run -> SUCCESS, RAM 14.2%, Flash 72.6% (+8408 byte vs V3.9.11).
+- Firmware: APP_VERSION V3.9.12
+)
+---------------------------------------------------------
 Rev. ID    : 11
 Rev. Date  : 25.04.2026
 Rev. Time  : 11:28:21

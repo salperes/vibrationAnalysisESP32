@@ -103,7 +103,12 @@ static String infoJson()
 
   // Live preview sensor config (runtime adjustable from the Live tab).
   s += "\"liveHz\":" + String(g_live_pref_hz) + ",";
-  s += "\"liveFs\":" + String(g_live_pref_fs_g);
+  s += "\"liveFs\":" + String(g_live_pref_fs_g) + ",";
+  s += "\"liveFc\":" + String(g_live_lp_cut_hz, 1) + ",";
+  s += "\"liveZeroActive\":" + String(g_live_zero_active ? "true" : "false") + ",";
+  s += "\"liveZeroAcc\":" + String(g_live_noise_mag_acc, 5) + ",";
+  s += "\"liveZeroVel\":" + String(g_live_noise_mag_vel_mmps, 4) + ",";
+  s += "\"liveZeroDisp\":" + String(g_live_noise_mag_disp_mm, 5);
 
   s += "}";
   return s;
@@ -286,6 +291,8 @@ void registerRoutes()
   server.on("/api/live", handleApiLive);
   server.on("/api/realtime", HTTP_POST, handleApiRealtimeConfig);
   server.on("/api/live_config", HTTP_POST, handleApiLiveConfig);
+  server.on("/api/live_zero", HTTP_POST, handleApiLiveZero);
+  server.on("/api/live_zero_clear", HTTP_POST, handleApiLiveZeroClear);
   server.on("/api/rawmask", HTTP_POST, handleApiRawMask);
 
   server.on("/api/reset", HTTP_POST, handleApiReset);

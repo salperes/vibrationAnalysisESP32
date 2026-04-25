@@ -431,6 +431,115 @@ bool saveDeviceName(const char *name)
   return true;
 }
 
+// ---- Live noise floor (zero) NVS persistence ----
+//
+// Layout: a single binary blob in namespace "livezero", key "blob".
+// Includes a CRC over the payload so a corrupt write is detected.
+namespace {
+struct LiveZeroBlob
+{
+  uint32_t version;
+  uint8_t  active;
+  float    acc[3];
+  float    vel[3];
+  float    disp[3];
+  float    mag_acc;
+  float    mag_vel;
+  float    mag_disp;
+  uint32_t crc;
+};
+constexpr uint32_t LIVEZERO_VERSION = 1;
+
+uint32_t crc32_simple(const uint8_t *data, size_t len)
+{
+  uint32_t c = 0x5A5A5A5Au;
+  for (size_t i = 0; i < len; i++) {
+    c ^= data[i];
+    c = (c << 5) | (c >> 27);
+    c += 0x9E3779B9u;
+  }
+  return c;
+}
+} // anon
+
+bool saveLiveZeroNVS()
+{
+  Preferences pref;
+  if (!pref.begin("livezero", false)) return false;
+  LiveZeroBlob b{};
+  b.version = LIVEZERO_VERSION;
+  b.active  = g_live_zero_active ? 1 : 0;
+  for (int i = 0; i < 3; i++) {
+    b.acc[i]  = g_live_noise_acc_mps2[i];
+    b.vel[i]  = g_live_noise_vel_mmps[i];
+    b.disp[i] = g_live_noise_disp_mm[i];
+  }
+  b.mag_acc  = g_live_noise_mag_acc;
+  b.mag_vel  = g_live_noise_mag_vel_mmps;
+  b.mag_disp = g_live_noise_mag_disp_mm;
+  b.crc = crc32_simple(reinterpret_cast<const uint8_t*>(&b),
+                       sizeof(LiveZeroBlob) - sizeof(uint32_t));
+  size_t wrote = pref.putBytes("blob", &b, sizeof(b));
+  pref.end();
+  return wrote == sizeof(b);
+}
+
+bool clearLiveZeroNVS()
+{
+  g_live_zero_active = false;
+  for (int i = 0; i < 3; i++) {
+    g_live_noise_acc_mps2[i] = 0;
+    g_live_noise_vel_mmps[i] = 0;
+    g_live_noise_disp_mm[i]  = 0;
+  }
+  g_live_noise_mag_acc      = 0;
+  g_live_noise_mag_vel_mmps = 0;
+  g_live_noise_mag_disp_mm  = 0;
+
+  Preferences pref;
+  if (!pref.begin("livezero", false)) return false;
+  bool ok = pref.remove("blob");
+  pref.end();
+  return ok;
+}
+
+void loadLiveZeroAtBoot()
+{
+  Preferences pref;
+  if (!pref.begin("livezero", true)) {
+    Serial.println("[LIVEZERO] NVS namespace not present");
+    return;
+  }
+  LiveZeroBlob b{};
+  size_t got = pref.getBytes("blob", &b, sizeof(b));
+  pref.end();
+  if (got != sizeof(b)) {
+    Serial.println("[LIVEZERO] No saved zero blob");
+    return;
+  }
+  if (b.version != LIVEZERO_VERSION) {
+    Serial.println("[LIVEZERO] Version mismatch -- ignoring");
+    return;
+  }
+  uint32_t crc = crc32_simple(reinterpret_cast<const uint8_t*>(&b),
+                              sizeof(LiveZeroBlob) - sizeof(uint32_t));
+  if (crc != b.crc) {
+    Serial.println("[LIVEZERO] CRC mismatch -- ignoring");
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    g_live_noise_acc_mps2[i] = b.acc[i];
+    g_live_noise_vel_mmps[i] = b.vel[i];
+    g_live_noise_disp_mm[i]  = b.disp[i];
+  }
+  g_live_noise_mag_acc      = b.mag_acc;
+  g_live_noise_mag_vel_mmps = b.mag_vel;
+  g_live_noise_mag_disp_mm  = b.mag_disp;
+  g_live_zero_active        = (b.active != 0);
+  Serial.printf("[LIVEZERO] Loaded: active=%d  acc_mag=%.4f  vel_mag=%.4f\n",
+                (int)g_live_zero_active, g_live_noise_mag_acc, g_live_noise_mag_vel_mmps);
+}
+
 // ---- Calibration boot-load ----
 void loadCalibrationAtBoot()
 {

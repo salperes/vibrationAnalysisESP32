@@ -59,3 +59,11 @@ void loadDeviceIdentity();
 // Persists `name` (max 23 chars) to NVS and updates g_device_name. Returns
 // false if the input is empty or too long.
 bool saveDeviceName(const char *name);
+
+// ---- Live noise floor (zero) ----
+// Persists the current g_live_noise_* globals (and active flag) to NVS so
+// the user's "ZERO" calibration survives reboots. Load is invoked from
+// loadLiveZeroAtBoot() during setup().
+bool saveLiveZeroNVS();
+bool clearLiveZeroNVS();
+void loadLiveZeroAtBoot();

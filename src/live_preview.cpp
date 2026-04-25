@@ -95,6 +95,167 @@ static float measureRealtimeNoise(LIS2DW12 &lis, const uint8_t resBits, const ui
   return sqrtf((float)(sumSq / (double)valid));
 }
 
+// ======================= Live zero (noise floor capture) =======================
+// Performs a fresh ~250 ms measurement and stores the resulting per-axis +
+// magnitude RMS values as the "noise floor" to be subtracted in quadrature
+// from subsequent /api/live readings.
+void handleApiLiveZero()
+{
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
+  {
+    server.send(409, "text/plain", "Busy");
+    return;
+  }
+  if (g_realtimeEnabled)
+  {
+    server.send(409, "text/plain", "Disable realtime mode first");
+    return;
+  }
+
+  if (!g_i2cMutex || xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(5000)) != pdTRUE)
+  {
+    server.send(500, "text/plain", "I2C mutex timeout");
+    return;
+  }
+
+  Wire.setClock(400000);
+  if (!g_liveSensorReady || g_calDirty)
+  {
+    if (!g_liveSensor.begin(-1, -1, 400000))
+    {
+      if (g_i2cMutex) xSemaphoreGive(g_i2cMutex);
+      server.send(500, "text/plain", "Sensor init failed");
+      return;
+    }
+    LIS2DW12::Config cfg;
+    cfg.mode    = LIS2DW12::Mode::HighPerf;
+    cfg.lpMode  = LIS2DW12::LowPowerMode::LP2_14bit;
+    cfg.fs      = fsFromG(g_live_pref_fs_g);
+    cfg.lowNoise = true;
+    cfg.bdu     = true;
+    cfg.autoInc = true;
+    g_liveSensor.applyConfig(cfg);
+    g_liveSensor.setRateHz(g_live_pref_hz);
+    g_liveSensor.loadCalibrationNVS("lis2dw12", "cal");
+    g_calDirty = false;
+    g_liveSensorReady = true;
+  }
+
+  auto cal = g_liveSensor.getCalibration();
+  const uint8_t resBits = g_liveSensor.activeResolutionBits();
+  const uint8_t fs_g    = g_live_pref_fs_g;
+  const float   cutoff  = g_live_lp_cut_hz;
+
+  const uint16_t N = min((uint16_t)200, g_live_pref_hz);
+  float *bx = (float *)malloc(N * sizeof(float));
+  float *by = (float *)malloc(N * sizeof(float));
+  float *bz = (float *)malloc(N * sizeof(float));
+  if (!bx || !by || !bz)
+  {
+    free(bx); free(by); free(bz);
+    if (g_i2cMutex) xSemaphoreGive(g_i2cMutex);
+    server.send(500, "text/plain", "OOM");
+    return;
+  }
+
+  uint16_t valid = 0;
+  uint32_t t_start = micros();
+  for (uint16_t i = 0; i < N; i++)
+  {
+    int16_t axRaw, ayRaw, azRaw;
+    if (!g_liveSensor.readRawAligned(axRaw, ayRaw, azRaw)) { delayMicroseconds(1200); continue; }
+    if (g_rawMaskBits)
+    {
+      int16_t mask = ~((1 << g_rawMaskBits) - 1);
+      axRaw &= mask; ayRaw &= mask; azRaw &= mask;
+    }
+    float gx = applyCal1(rawAlignedToG(axRaw, resBits, fs_g), cal.offset_g[0], cal.scale[0]);
+    float gy = applyCal1(rawAlignedToG(ayRaw, resBits, fs_g), cal.offset_g[1], cal.scale[1]);
+    float gz = applyCal1(rawAlignedToG(azRaw, resBits, fs_g), cal.offset_g[2], cal.scale[2]);
+    bx[valid] = gx * GRAVITY_MPS2;
+    by[valid] = gy * GRAVITY_MPS2;
+    bz[valid] = gz * GRAVITY_MPS2;
+    valid++;
+    delayMicroseconds(1200);
+  }
+  uint32_t t_end = micros();
+
+  if (g_i2cMutex) xSemaphoreGive(g_i2cMutex);
+
+  if (!valid)
+  {
+    free(bx); free(by); free(bz);
+    server.send(500, "text/plain", "No samples");
+    return;
+  }
+
+  const float dt = (float)(t_end - t_start) * 1e-6f / (float)valid;
+
+  // Mean removal
+  double sx = 0, sy = 0, sz = 0;
+  for (uint16_t i = 0; i < valid; i++) { sx += bx[i]; sy += by[i]; sz += bz[i]; }
+  const float mx = (float)(sx / valid), my = (float)(sy / valid), mz = (float)(sz / valid);
+
+  // LPF + integrate + accumulate sum-of-squares (same pipeline as handleApiLive)
+  const float tau = 1.0f / (2.0f * PI * cutoff);
+  const float alpha = dt / (tau + dt);
+  float lpf[3] = {0, 0, 0};
+  bool lpfInit = false;
+  float vel[3] = {0, 0, 0}, disp[3] = {0, 0, 0};
+  double ss_a[3] = {0, 0, 0}, ss_v[3] = {0, 0, 0}, ss_d[3] = {0, 0, 0};
+
+  for (uint16_t i = 0; i < valid; i++)
+  {
+    const float a[3] = { bx[i] - mx, by[i] - my, bz[i] - mz };
+    if (!lpfInit) { lpf[0] = a[0]; lpf[1] = a[1]; lpf[2] = a[2]; lpfInit = true; }
+    else { lpf[0] += alpha * (a[0] - lpf[0]); lpf[1] += alpha * (a[1] - lpf[1]); lpf[2] += alpha * (a[2] - lpf[2]); }
+    vel[0] += lpf[0] * dt; vel[1] += lpf[1] * dt; vel[2] += lpf[2] * dt;
+    disp[0] += vel[0] * dt; disp[1] += vel[1] * dt; disp[2] += vel[2] * dt;
+    ss_a[0] += (double)lpf[0] * lpf[0]; ss_a[1] += (double)lpf[1] * lpf[1]; ss_a[2] += (double)lpf[2] * lpf[2];
+    ss_v[0] += (double)vel[0] * vel[0]; ss_v[1] += (double)vel[1] * vel[1]; ss_v[2] += (double)vel[2] * vel[2];
+    ss_d[0] += (double)disp[0] * disp[0]; ss_d[1] += (double)disp[1] * disp[1]; ss_d[2] += (double)disp[2] * disp[2];
+  }
+
+  free(bx); free(by); free(bz);
+
+  const float invN = 1.0f / (float)valid;
+  for (int k = 0; k < 3; k++)
+  {
+    g_live_noise_acc_mps2[k] = sqrtf((float)(ss_a[k] * invN));
+    g_live_noise_vel_mmps[k] = sqrtf((float)(ss_v[k] * invN)) * 1000.0f;
+    g_live_noise_disp_mm[k]  = sqrtf((float)(ss_d[k] * invN)) * 1000.0f;
+  }
+  g_live_noise_mag_acc      = sqrtf(g_live_noise_acc_mps2[0] * g_live_noise_acc_mps2[0] +
+                                    g_live_noise_acc_mps2[1] * g_live_noise_acc_mps2[1] +
+                                    g_live_noise_acc_mps2[2] * g_live_noise_acc_mps2[2]);
+  g_live_noise_mag_vel_mmps = sqrtf(g_live_noise_vel_mmps[0] * g_live_noise_vel_mmps[0] +
+                                    g_live_noise_vel_mmps[1] * g_live_noise_vel_mmps[1] +
+                                    g_live_noise_vel_mmps[2] * g_live_noise_vel_mmps[2]);
+  g_live_noise_mag_disp_mm  = sqrtf(g_live_noise_disp_mm[0] * g_live_noise_disp_mm[0] +
+                                    g_live_noise_disp_mm[1] * g_live_noise_disp_mm[1] +
+                                    g_live_noise_disp_mm[2] * g_live_noise_disp_mm[2]);
+  g_live_zero_active = true;
+  saveLiveZeroNVS();
+  g_liveLastMs = 0; // bypass cache so next /api/live reflects subtraction immediately
+
+  String s = "{\"ok\":true,\"acc_mag\":" + String(g_live_noise_mag_acc, 5) +
+             ",\"vel_mag\":" + String(g_live_noise_mag_vel_mmps, 4) +
+             ",\"disp_mag\":" + String(g_live_noise_mag_disp_mm, 5) + "}";
+  server.send(200, "application/json", s);
+}
+
+void handleApiLiveZeroClear()
+{
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
+  {
+    server.send(409, "text/plain", "Busy");
+    return;
+  }
+  clearLiveZeroNVS();
+  g_liveLastMs = 0;
+  server.send(200, "text/plain", "OK");
+}
+
 // ======================= Live config (Hz / fs) =======================
 void handleApiLiveConfig()
 {
@@ -137,9 +298,10 @@ void handleApiLiveConfig()
   g_live_pref_fs_g = fs;
   if (changed)
   {
-    g_calDirty = true;       // force g_liveSensor reinit next /api/live
-    g_liveLastMs = 0;        // bypass 1 s cache
-    g_realtimeEnabled = false; // cancel realtime mode (cached noise floor invalid)
+    g_calDirty = true;          // force g_liveSensor reinit next /api/live
+    g_liveLastMs = 0;           // bypass 1 s cache
+    g_realtimeEnabled = false;  // cancel realtime mode (cached noise floor invalid)
+    g_live_zero_active = false; // captured zero used previous Hz/G; deactivate
     resetLivePreviewState();
   }
 
@@ -300,6 +462,13 @@ void handleApiLive()
     if (fcReq >= 5.0f && fcReq <= (float)g_live_pref_hz * 0.5f)
       cutoff = fcReq;
   }
+  // If the cutoff just changed, the previously-captured noise floor was
+  // measured under different filter conditions and is no longer valid.
+  // Deactivate (but don't clear NVS -- user can rezero or revert cutoff).
+  if (g_live_zero_active && fabsf(cutoff - g_live_lp_cut_hz) > 0.01f)
+  {
+    g_live_zero_active = false;
+  }
   g_live_lp_cut_hz = cutoff;
 
   const uint16_t N = min((uint16_t)200, g_live_pref_hz);
@@ -443,7 +612,6 @@ void handleApiLive()
       g_live_acc_mps2[k] = sqrtf((float)(ss_a[k] * invN));
       g_live_vel_mmps[k] = sqrtf((float)(ss_v[k] * invN)) * 1000.0f;
       g_live_disp_mm[k]  = sqrtf((float)(ss_d[k] * invN)) * 1000.0f;
-      g_live_g[k]        = g_live_acc_mps2[k] / GRAVITY_MPS2;
     }
     g_live_mag_acc = sqrtf(g_live_acc_mps2[0] * g_live_acc_mps2[0] +
                            g_live_acc_mps2[1] * g_live_acc_mps2[1] +
@@ -454,6 +622,26 @@ void handleApiLive()
     g_live_mag_disp_mm = sqrtf(g_live_disp_mm[0] * g_live_disp_mm[0] +
                                g_live_disp_mm[1] * g_live_disp_mm[1] +
                                g_live_disp_mm[2] * g_live_disp_mm[2]);
+
+    // Quadrature noise-floor subtraction. Treats the signal RMS and the
+    // captured noise RMS as uncorrelated, so signal_rms = sqrt(total^2 - noise^2).
+    if (g_live_zero_active)
+    {
+      auto qsub = [](float &v, float n) {
+        const float v2 = v * v, n2 = n * n;
+        v = (v2 > n2) ? sqrtf(v2 - n2) : 0.0f;
+      };
+      for (int k = 0; k < 3; k++)
+      {
+        qsub(g_live_acc_mps2[k], g_live_noise_acc_mps2[k]);
+        qsub(g_live_vel_mmps[k], g_live_noise_vel_mmps[k]);
+        qsub(g_live_disp_mm[k],  g_live_noise_disp_mm[k]);
+      }
+      qsub(g_live_mag_acc,      g_live_noise_mag_acc);
+      qsub(g_live_mag_vel_mmps, g_live_noise_mag_vel_mmps);
+      qsub(g_live_mag_disp_mm,  g_live_noise_mag_disp_mm);
+    }
+    for (int k = 0; k < 3; k++) g_live_g[k] = g_live_acc_mps2[k] / GRAVITY_MPS2;
 
     const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
     String s = "{";

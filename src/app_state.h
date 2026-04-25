@@ -205,6 +205,18 @@ extern float g_live_g[3];
 extern uint16_t g_live_pref_hz;   // sample rate Hz (100/200/400/800/1600)
 extern uint8_t  g_live_pref_fs_g; // full-scale range (2/4/8/16)
 extern float g_live_lp_cut_hz; // default low-pass cutoff for preview
+
+// ----- Live noise floor (per-axis + magnitude RMS captured by /api/live_zero)
+// When g_live_zero_active is true, handleApiLive applies quadrature
+// subtraction to the freshly-computed RMS values: out = sqrt(max(0, raw^2 - noise^2)).
+// Persisted in NVS under namespace "livezero".
+extern volatile bool g_live_zero_active;
+extern float g_live_noise_acc_mps2[3];
+extern float g_live_noise_vel_mmps[3];
+extern float g_live_noise_disp_mm[3];
+extern float g_live_noise_mag_acc;
+extern float g_live_noise_mag_vel_mmps;
+extern float g_live_noise_mag_disp_mm;
 extern const float GRAVITY_MPS2;
 extern float g_live_acc_mps2[3];
 extern float g_live_vel_mmps[3];

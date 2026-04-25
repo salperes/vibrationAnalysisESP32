@@ -89,6 +89,7 @@ void setup()
 
   loadDeviceIdentity();
   loadCalibrationAtBoot();
+  loadLiveZeroAtBoot();
 
   startWiFiOrAP();
   Serial.println("[BOOT] WiFi/AP init done");

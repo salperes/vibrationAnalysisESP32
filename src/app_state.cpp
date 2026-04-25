@@ -31,6 +31,14 @@ float g_live_g[3] = {0, 0, 0};
 uint16_t g_live_pref_hz   = 800;
 uint8_t  g_live_pref_fs_g = 2;
 float g_live_lp_cut_hz = 200.0f; // default low-pass cutoff for preview
+
+volatile bool g_live_zero_active = false;
+float g_live_noise_acc_mps2[3] = {0, 0, 0};
+float g_live_noise_vel_mmps[3] = {0, 0, 0};
+float g_live_noise_disp_mm[3]  = {0, 0, 0};
+float g_live_noise_mag_acc      = 0.0f;
+float g_live_noise_mag_vel_mmps = 0.0f;
+float g_live_noise_mag_disp_mm  = 0.0f;
 const float GRAVITY_MPS2 = 9.80665f;
 float g_live_acc_mps2[3] = {0, 0, 0};
 float g_live_vel_mmps[3] = {0, 0, 0};

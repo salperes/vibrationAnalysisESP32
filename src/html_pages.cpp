@@ -212,8 +212,31 @@ const char ROOT_HTML[] PROGMEM = R"HTML(
         <option value="8">±8 g</option>
         <option value="16">±16 g</option>
       </select>
+      <label>LPF cutoff</label>
+      <select id="live_fc">
+        <option value="5">5 Hz</option>
+        <option value="10">10 Hz</option>
+        <option value="20">20 Hz</option>
+        <option value="50">50 Hz</option>
+        <option value="100">100 Hz</option>
+        <option value="200" selected>200 Hz</option>
+        <option value="400">400 Hz</option>
+      </select>
     </div>
     <pre id="live_status" class="small mono">rate: -</pre>
+  </div>
+  <div class="card">
+    <h2>Noise floor (zero)</h2>
+    <div class="small" style="margin-bottom:8px">
+      Place the device on a still surface and press ZERO. The captured RMS
+      values are subtracted in quadrature from subsequent readings.
+    </div>
+    <div class="row" style="gap:10px">
+      <button class="primary" onclick="captureLiveZero()">ZERO</button>
+      <button onclick="clearLiveZero()">CLEAR</button>
+      <span id="live_zero_badge" class="badge uncal">no zero</span>
+    </div>
+    <pre id="live_zero_info" class="small mono" style="margin-top:8px">-</pre>
   </div>
   <div class="card">
     <h2>Device</h2>
@@ -591,6 +614,23 @@ async function refreshInfo(){
       const sel=document.getElementById('live_fs');
       if(sel.value!=String(j.liveFs)) sel.value=String(j.liveFs);
     }
+    // LPF cutoff: round server value to nearest dropdown option.
+    if(typeof j.liveFc==='number'){
+      const sel=document.getElementById('live_fc');
+      const opts=[5,10,20,50,100,200,400];
+      const closest=opts.reduce((a,b)=>Math.abs(b-j.liveFc)<Math.abs(a-j.liveFc)?b:a);
+      if(parseInt(sel.value,10)!==closest && !sel.matches(':focus')) sel.value=String(closest);
+    }
+    // Zero badge
+    const zb=document.getElementById('live_zero_badge');
+    const zi=document.getElementById('live_zero_info');
+    if(j.liveZeroActive){
+      zb.textContent='zero ON'; zb.className='badge cal';
+      zi.textContent='floor (mag) acc:'+(j.liveZeroAcc||0).toFixed(5)+' m/s²  vel:'+(j.liveZeroVel||0).toFixed(4)+' mm/s  disp:'+(j.liveZeroDisp||0).toFixed(5)+' mm';
+    } else {
+      zb.textContent='no zero'; zb.className='badge uncal';
+      zi.textContent='-';
+    }
 
     // ---------- Grab buttons + state label ----------
     document.getElementById('grab_armBtn').disabled=(state!=='Idle');
@@ -642,7 +682,11 @@ async function refreshInfo(){
 async function refreshLive(){
   if(_currentTab!=='live' && _currentTab!=='preview') return;
   try{
-    const j=await getJson('/api/live');
+    // Send the user's chosen LPF cutoff with each /api/live so the cutoff
+    // sticks as a query param even if the device reboots between calls.
+    const fc=document.getElementById('live_fc')?.value||'';
+    const url=fc?('/api/live?fc='+encodeURIComponent(fc)):'/api/live';
+    const j=await getJson(url);
     if(j.enabled===false) return;
 
     if(_currentTab==='live'){
@@ -675,7 +719,27 @@ async function setLiveConfig(){
   const fs=document.getElementById('live_fs').value;
   const r=await postText('/api/live_config',{hz,fs});
   if(!r.ok){alert('Live config failed: '+r.text);return;}
-  toast('Live: '+hz+' Hz, ±'+fs+' g');
+  toast('Live: '+hz+' Hz, ±'+fs+' g (zero cleared)');
+}
+
+async function captureLiveZero(){
+  if(!confirm('ZERO\nDevice must be still on a stable surface.\nMeasure noise floor now?')) return;
+  const btn=document.querySelector('#tab-live .primary');
+  if(btn) btn.disabled=true;
+  toast('Capturing noise floor...');
+  try{
+    const r=await fetch('/api/live_zero',{method:'POST',cache:'no-store'});
+    const t=await r.text();
+    if(!r.ok){ alert('Zero failed: '+t); return; }
+    toast('Noise floor captured');
+  }catch(e){ alert('Zero error: '+(e?.message||e)); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
+async function clearLiveZero(){
+  const r=await postText('/api/live_zero_clear');
+  if(!r.ok){ alert('Clear failed: '+r.text); return; }
+  toast('Noise floor cleared');
 }
 
 /* =====================================================================

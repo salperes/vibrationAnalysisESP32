@@ -95,6 +95,58 @@ static float measureRealtimeNoise(LIS2DW12 &lis, const uint8_t resBits, const ui
   return sqrtf((float)(sumSq / (double)valid));
 }
 
+// ======================= Live config (Hz / fs) =======================
+void handleApiLiveConfig()
+{
+  if (g_recording || g_calibratingStatic || g_calibrating6 || g_trigState != TrigState::Idle)
+  {
+    server.send(409, "text/plain", "Busy");
+    return;
+  }
+  if (!server.hasArg("hz") && !server.hasArg("fs"))
+  {
+    server.send(400, "text/plain", "Need hz or fs");
+    return;
+  }
+
+  uint16_t hz = g_live_pref_hz;
+  uint8_t  fs = g_live_pref_fs_g;
+
+  if (server.hasArg("hz"))
+  {
+    uint16_t req = (uint16_t)server.arg("hz").toInt();
+    const uint16_t allowed[] = {100, 200, 400, 800, 1600};
+    bool ok = false;
+    for (auto v : allowed) if (req == v) { ok = true; break; }
+    if (!ok) { server.send(400, "text/plain", "Invalid hz"); return; }
+    hz = req;
+  }
+  if (server.hasArg("fs"))
+  {
+    uint8_t req = (uint8_t)server.arg("fs").toInt();
+    if (!(req == 2 || req == 4 || req == 8 || req == 16))
+    {
+      server.send(400, "text/plain", "Invalid fs");
+      return;
+    }
+    fs = req;
+  }
+
+  const bool changed = (hz != g_live_pref_hz) || (fs != g_live_pref_fs_g);
+  g_live_pref_hz   = hz;
+  g_live_pref_fs_g = fs;
+  if (changed)
+  {
+    g_calDirty = true;       // force g_liveSensor reinit next /api/live
+    g_liveLastMs = 0;        // bypass 1 s cache
+    g_realtimeEnabled = false; // cancel realtime mode (cached noise floor invalid)
+    resetLivePreviewState();
+  }
+
+  String s = "{\"hz\":" + String(hz) + ",\"fs\":" + String(fs) + "}";
+  server.send(200, "application/json", s);
+}
+
 // ======================= Realtime config =======================
 void handleApiRealtimeConfig()
 {
@@ -145,12 +197,12 @@ void handleApiRealtimeConfig()
   LIS2DW12::Config cfg;
   cfg.mode = LIS2DW12::Mode::HighPerf;
   cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
-  cfg.fs = LIS2DW12::FullScale::G2;
+  cfg.fs = fsFromG(g_live_pref_fs_g);
   cfg.lowNoise = true;
   cfg.bdu = true;
   cfg.autoInc = true;
   lis.applyConfig(cfg);
-  lis.setRateHz(LIVE_PREVIEW_HZ);
+  lis.setRateHz(g_live_pref_hz);
   lis.loadCalibrationNVS("lis2dw12", "cal");
   g_calDirty = false;
 
@@ -180,7 +232,7 @@ void handleApiLive()
     const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
     String s = "{";
     s += "\"enabled\":true,";
-    s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+    s += "\"hz\":" + String(g_live_pref_hz) + ",";
     s += "\"dt_us\":" + String(g_live_dt_us) + ",";
     s += "\"eff_hz\":" + String(effHz, 1) + ",";
     s += "\"fc\":" + String(g_live_lp_cut_hz, 1) + ",";
@@ -226,12 +278,12 @@ void handleApiLive()
     LIS2DW12::Config cfg;
     cfg.mode = LIS2DW12::Mode::HighPerf;
     cfg.lpMode = LIS2DW12::LowPowerMode::LP2_14bit;
-    cfg.fs = LIS2DW12::FullScale::G2;
+    cfg.fs = fsFromG(g_live_pref_fs_g);
     cfg.lowNoise = true;
     cfg.bdu = true;
     cfg.autoInc = true;
     g_liveSensor.applyConfig(cfg);
-    g_liveSensor.setRateHz(LIVE_PREVIEW_HZ);
+    g_liveSensor.setRateHz(g_live_pref_hz);
     g_liveSensor.loadCalibrationNVS("lis2dw12", "cal");
     g_calDirty = false;
     g_liveSensorReady = true;
@@ -239,18 +291,18 @@ void handleApiLive()
 
   auto cal = g_liveSensor.getCalibration();
   const uint8_t resBits = g_liveSensor.activeResolutionBits();
-  const uint8_t fs_g = fsToByte(LIS2DW12::FullScale::G2);
+  const uint8_t fs_g = g_live_pref_fs_g;
 
   float cutoff = g_live_lp_cut_hz;
   if (server.hasArg("fc"))
   {
     float fcReq = server.arg("fc").toFloat();
-    if (fcReq >= 5.0f && fcReq <= (float)LIVE_PREVIEW_HZ * 0.5f)
+    if (fcReq >= 5.0f && fcReq <= (float)g_live_pref_hz * 0.5f)
       cutoff = fcReq;
   }
   g_live_lp_cut_hz = cutoff;
 
-  const uint16_t N = min((uint16_t)200, LIVE_PREVIEW_HZ);
+  const uint16_t N = min((uint16_t)200, g_live_pref_hz);
 
   // Heap-allocated per-axis buffers (3 * N * 4 bytes ~= 2.4 KB at N=200).
   // Acquiring all samples first lets us compute the per-axis mean (DC removal)
@@ -406,7 +458,7 @@ void handleApiLive()
     const float effHz = (g_live_dt_us > 0) ? (1e6f / (float)g_live_dt_us) : 0.0f;
     String s = "{";
     s += "\"enabled\":true,";
-    s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+    s += "\"hz\":" + String(g_live_pref_hz) + ",";
     s += "\"dt_us\":" + String(g_live_dt_us) + ",";
     s += "\"eff_hz\":" + String(effHz, 1) + ",";
     s += "\"fc\":" + String(cutoff, 1) + ",";
@@ -507,7 +559,7 @@ void handleApiLive()
   String s = "{";
   s += "\"enabled\":true,";
   s += "\"realtime\":true,";
-  s += "\"hz\":" + String(LIVE_PREVIEW_HZ) + ",";
+  s += "\"hz\":" + String(g_live_pref_hz) + ",";
   s += "\"dt_us\":" + String(g_live_dt_us) + ",";
   s += "\"eff_hz\":" + String(effHz, 1) + ",";
   s += "\"noise_mps2\":" + String(g_rt_noise_mps2, 4) + ",";

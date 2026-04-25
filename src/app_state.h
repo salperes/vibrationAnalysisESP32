@@ -200,7 +200,10 @@ extern float g_calibAvg[6][3];
 
 extern uint32_t g_liveLastMs;
 extern float g_live_g[3];
-extern const uint16_t LIVE_PREVIEW_HZ;
+// Live preview sensor configuration (runtime adjustable via /api/live_config).
+// Setter must also set g_calDirty=true so the next /api/live re-applies them.
+extern uint16_t g_live_pref_hz;   // sample rate Hz (100/200/400/800/1600)
+extern uint8_t  g_live_pref_fs_g; // full-scale range (2/4/8/16)
 extern float g_live_lp_cut_hz; // default low-pass cutoff for preview
 extern const float GRAVITY_MPS2;
 extern float g_live_acc_mps2[3];

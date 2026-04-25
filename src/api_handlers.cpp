@@ -99,7 +99,11 @@ static String infoJson()
   uint32_t firedMs = (g_trigFiredAtMs)
                          ? (now - g_trigFiredAtMs) : 0;
   s += "\"trigArmedMs\":" + String(armedMs) + ",";
-  s += "\"trigFiredMs\":" + String(firedMs);
+  s += "\"trigFiredMs\":" + String(firedMs) + ",";
+
+  // Live preview sensor config (runtime adjustable from the Live tab).
+  s += "\"liveHz\":" + String(g_live_pref_hz) + ",";
+  s += "\"liveFs\":" + String(g_live_pref_fs_g);
 
   s += "}";
   return s;
@@ -143,8 +147,7 @@ static void handleApiDevicePost()
 }
 
 // ======================= Simple handlers =======================
-static void handleRoot() { server.send(200, "text/html", GRAB_HTML); }
-static void handleLive() { server.send(200, "text/html", LIVE_HTML); }
+static void handleRoot() { server.send(200, "text/html", ROOT_HTML); }
 static void handlePing() { server.send(200, "text/plain", "PONG"); }
 static void handleApiInfo() { server.send(200, "application/json", infoJson()); }
 static void handleApiVersion() { server.send(200, "application/json", versionJson()); }
@@ -264,7 +267,6 @@ static void handleUpdateUpload()
 void registerRoutes()
 {
   server.on("/", handleRoot);
-  server.on("/live", handleLive);
   server.on("/ping", handlePing);
 
   server.on("/api/info", handleApiInfo);
@@ -283,6 +285,7 @@ void registerRoutes()
 
   server.on("/api/live", handleApiLive);
   server.on("/api/realtime", HTTP_POST, handleApiRealtimeConfig);
+  server.on("/api/live_config", HTTP_POST, handleApiLiveConfig);
   server.on("/api/rawmask", HTTP_POST, handleApiRawMask);
 
   server.on("/api/reset", HTTP_POST, handleApiReset);

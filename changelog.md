@@ -1,4 +1,53 @@
 ---------------------------------------------------------
+Rev. ID    : 11
+Rev. Date  : 25.04.2026
+Rev. Time  : 11:28:21
+Rev. Prompt: live tab ekle (sadece RMS + Hz/G), tabbed UI mobile-friendly. Default Live, sonra Grab, Preview, FW Update
+
+Rev. Report: (
+Web UI tek sayfada 4 tab'a tasindi (mobil dostu). Default tab Live;
+sirasiyla Grab, Preview, Update. URL hash takibi: /, /#grab, /#preview,
+/#update direkt erisilebilir.
+
+- Web UI: ROOT_HTML yeni tek sayfa (/ rotasinda servis edilir).
+    Tab 1 Live    : sadece RMS degerleri (acc/vel/disp magnitude + per-axis).
+                    Buyuk okunakli tipografi, mobil ekrana optimize.
+                    Hz/G dropdown'lari altta; degisince /api/live_config
+                    gonderiliyor.
+    Tab 2 Grab    : eski GRAB_HTML icerigi (metadata + trigger + state).
+    Tab 3 Preview : eski LIVE_HTML icerigi (manual record, dosya listesi,
+                    canli onizleme grafikleri, analyze, FFT, kalibrasyon).
+                    Tab'a ilk girilince fileList + fsinfo cekiliyor (lazy).
+    Tab 4 Update  : OTA upload form'u inline (XHR + progress).
+- Web UI: Header sticky; tab nav scrollable (mobil yatay kaydirma destekli).
+  Touch target'lar >=44 px. Responsive grid (mobile <600px tek kolon).
+- Web UI: ID'ler tab'lara gore namespaced (live_, grab_, prev_, up_).
+  Conflict yok.
+- Web UI: refreshInfo() polling tek noktadan tum tab'lari guncelliyor;
+  refreshLive sadece Live + Preview tab'larinda calisir; refreshFiles +
+  refreshFsInfo sadece Preview tab'inda. Bandwidth tasarrufu.
+- API: yeni POST /api/live_config -- hz=100|200|400|800|1600 ve
+  fs=2|4|8|16 parametreleri; g_live_pref_hz / g_live_pref_fs_g
+  global'larini set ediyor; g_calDirty=true ile cached g_liveSensor
+  bir sonraki /api/live cagrisinda yeniden init edilir; realtime
+  mode reset.
+- API: /api/info JSON'a "liveHz", "liveFs" alanlari eklendi (UI sync).
+- Sensor: live_preview.cpp'deki sabit LIVE_PREVIEW_HZ=800 ve
+  FullScale::G2 referanslari g_live_pref_hz / fsFromG(g_live_pref_fs_g)
+  ile degistirildi. handleApiRealtimeConfig de ayni globalleri okuyor.
+- Routing: "/grab" ve "/live" rotalari kaldirildi (kullanici tab UI'a
+  yonlendiriliyor). "/update" GET hala UPDATE_HTML standalone form'u
+  servis ediyor (backward compat).
+
+UPDATE_HTML korundu (legacy /update direct flash).
+GRAB_HTML ve LIVE_HTML constant'lari silindi (icerikleri ROOT_HTML'e
+tabular halde tasindi).
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 72.0% (~943 KB; toplam
+hemen hemen ayni - tabbed UI'in CSS+JS dedup'i sayesinde).
+- Firmware: APP_VERSION V3.9.11
+)
+---------------------------------------------------------
 Rev. ID    : 10
 Rev. Date  : 25.04.2026
 Rev. Time  : 11:07:40

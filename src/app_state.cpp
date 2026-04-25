@@ -28,7 +28,8 @@ float g_calibAvg[6][3] = {0};
 
 uint32_t g_liveLastMs = 0;
 float g_live_g[3] = {0, 0, 0};
-const uint16_t LIVE_PREVIEW_HZ = 800;
+uint16_t g_live_pref_hz   = 800;
+uint8_t  g_live_pref_fs_g = 2;
 float g_live_lp_cut_hz = 200.0f; // default low-pass cutoff for preview
 const float GRAVITY_MPS2 = 9.80665f;
 float g_live_acc_mps2[3] = {0, 0, 0};

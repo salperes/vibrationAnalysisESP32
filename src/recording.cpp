@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <LittleFS.h>
 
+#include "app_state.h"
 #include "recording.h"
 #include "sensor_utils.h"
 #include "file_handlers.h"
@@ -338,6 +339,21 @@ void handleApiStart()
     server.send(400, "text/plain", "Invalid hz");
     return;
   }
+
+  // Pre-flight disk check: header + samples * sample-size, plus safety margin
+  size_t needed = sizeof(FileHeaderV4) + (size_t)hz * (size_t)sec * sizeof(Sample6);
+  if (!hasFreeSpaceFor(needed))
+  {
+    server.send(507, "text/plain", "Insufficient storage for this recording");
+    return;
+  }
+
+  // Optional metadata params (Live View collects meas_point/scan_dir; the
+  // others are free-form). Empty strings are fine -- header just stores blanks.
+  copyToFixed(server.arg("meas_point"), g_recMeta.meas_point,    sizeof(g_recMeta.meas_point));
+  copyToFixed(server.arg("scan_dir"),   g_recMeta.scan_dir,      sizeof(g_recMeta.scan_dir));
+  copyToFixed(server.arg("operator"),   g_recMeta.operator_name, sizeof(g_recMeta.operator_name));
+  copyToFixed(server.arg("notes"),      g_recMeta.notes,         sizeof(g_recMeta.notes));
 
   g_cfg.hz = hz;
   g_cfg.sec = sec;

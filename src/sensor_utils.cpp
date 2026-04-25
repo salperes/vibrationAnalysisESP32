@@ -82,6 +82,15 @@ bool isValidYYMMDDHHMMSS(const String &ts)
   return true;
 }
 
+void copyToFixed(const String &v, char *dst, size_t cap)
+{
+  if (cap == 0) return;
+  memset(dst, 0, cap);
+  size_t n = v.length();
+  if (n >= cap) n = cap - 1;
+  memcpy(dst, v.c_str(), n);
+}
+
 String makeNewFileNameFromUI(const String &ts12)
 {
   String base = "/accel" + ts12;

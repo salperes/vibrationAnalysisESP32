@@ -475,14 +475,6 @@ static bool isAnyBusy()
          g_trigState != TrigState::Idle;
 }
 
-static void copyArgToFixed(const String &v, char *dst, size_t cap)
-{
-  memset(dst, 0, cap);
-  size_t n = v.length();
-  if (n >= cap) n = cap - 1;
-  memcpy(dst, v.c_str(), n);
-}
-
 void handleApiTriggerArm()
 {
   if (isAnyBusy()) {
@@ -533,10 +525,19 @@ void handleApiTriggerArm()
   }
 
   // ---- Metadata strings (truncated to fixed-buffer caps) ----
-  copyArgToFixed(server.arg("meas_point"), g_recMeta.meas_point, sizeof(g_recMeta.meas_point));
-  copyArgToFixed(server.arg("scan_dir"),   g_recMeta.scan_dir,   sizeof(g_recMeta.scan_dir));
-  copyArgToFixed(server.arg("operator"),   g_recMeta.operator_name, sizeof(g_recMeta.operator_name));
-  copyArgToFixed(server.arg("notes"),      g_recMeta.notes,      sizeof(g_recMeta.notes));
+  copyToFixed(server.arg("meas_point"), g_recMeta.meas_point, sizeof(g_recMeta.meas_point));
+  copyToFixed(server.arg("scan_dir"),   g_recMeta.scan_dir,   sizeof(g_recMeta.scan_dir));
+  copyToFixed(server.arg("operator"),   g_recMeta.operator_name, sizeof(g_recMeta.operator_name));
+  copyToFixed(server.arg("notes"),      g_recMeta.notes,      sizeof(g_recMeta.notes));
+
+  // Pre-flight disk check: header + (pre + max + post) * hz samples + safety
+  const size_t totalS = (size_t)pre_s + (size_t)max_s + (size_t)post_s;
+  const size_t needed = sizeof(FileHeaderV4) + totalS * (size_t)hz * sizeof(Sample6);
+  if (!hasFreeSpaceFor(needed))
+  {
+    server.send(507, "text/plain", "Insufficient storage for this recording");
+    return;
+  }
 
   // Latch trigger config globals
   g_trigPreS = pre_s;

@@ -228,6 +228,16 @@ const char LIVE_HTML[] PROGMEM = R"HTML(
         <option value="120">120</option>
       </select>
 
+      <label for="liveMeasPoint" style="margin-top:10px">Measurement point *</label>
+      <input id="liveMeasPoint" placeholder="e.g. Motor-DE" maxlength="23" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #bbb"/>
+
+      <label for="liveScanDir" style="margin-top:6px">Scan direction *</label>
+      <select id="liveScanDir">
+        <option value="RADIAL_H">Radial - Horizontal</option>
+        <option value="RADIAL_V">Radial - Vertical</option>
+        <option value="AXIAL">Axial</option>
+      </select>
+
       <div class="small" style="margin-top:10px">
         Dosya adı browser saatinden alınır: accelYYMMDDHHMMSS.dat
       </div>
@@ -465,16 +475,17 @@ function tsYYMMDDHHMMSS(){
 function prettyName(filePath){
   let n = filePath || "";
   if (n.startsWith("/")) n = n.slice(1);
-  const m = n.match(/^accel(\d{12})(?:_\d{2})?\.dat$/);
+  const m = n.match(/^(accel|grab)(\d{12})(?:_\d{2})?\.dat$/);
   if (!m) return n;
-  const ts = m[1];
+  const tag = (m[1] === 'grab') ? '[G]' : '[M]';
+  const ts = m[2];
   const yy = ts.slice(0,2);
   const MM = ts.slice(2,4);
   const DD = ts.slice(4,6);
   const HH = ts.slice(6,8);
   const mm = ts.slice(8,10);
   const ss = ts.slice(10,12);
-  return `${n}  [${yy}-${MM}-${DD} ${HH}:${mm}:${ss}]`;
+  return `${tag} ${n}  [${yy}-${MM}-${DD} ${HH}:${mm}:${ss}]`;
 }
 
 let lastRecording = null;
@@ -633,8 +644,13 @@ async function startRec(){
   const fs = document.getElementById("fs").value;
   const sec = document.getElementById("sec").value;
   const ts = tsYYMMDDHHMMSS();
+  const meas_point = document.getElementById("liveMeasPoint").value.trim();
+  const scan_dir   = document.getElementById("liveScanDir").value;
 
-  const r = await postText('/api/start', {hz, fs, sec, ts});
+  if(!meas_point){ alert('Measurement point is required'); return; }
+  if(!scan_dir)  { alert('Scan direction is required');    return; }
+
+  const r = await postText('/api/start', {hz, fs, sec, ts, meas_point, scan_dir});
   if(!r.ok) alert(r.text);
   else toast("STARTED");
 

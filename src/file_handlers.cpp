@@ -73,6 +73,15 @@ void setRawMaskBits(uint8_t bits)
   g_liveLastMs = 0;
 }
 
+bool hasFreeSpaceFor(size_t bytesNeeded)
+{
+  const size_t safety = 8192;
+  size_t total = LittleFS.totalBytes();
+  size_t used  = LittleFS.usedBytes();
+  size_t freeB = (total > used) ? (total - used) : 0;
+  return freeB >= bytesNeeded + safety;
+}
+
 // ======================= FS info =======================
 static String fsInfoJson()
 {

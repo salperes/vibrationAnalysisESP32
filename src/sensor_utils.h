@@ -17,6 +17,10 @@ bool fileExists(const String &path);
 String jsonEscape(const String &s);
 bool isValidYYMMDDHHMMSS(const String &ts);
 String makeNewFileNameFromUI(const String &ts12);
+// Copies `v` into a fixed-size null-padded buffer (used to load metadata
+// from form args into FileHeaderV4 / RecMetadata fields). Truncates to
+// cap-1 chars. Always null-terminates.
+void copyToFixed(const String &v, char *dst, size_t cap);
 
 // ---- Header read/write ----
 // Reads the file's header (V3 or V4) into a version-agnostic ParsedHeader.

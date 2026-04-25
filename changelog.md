@@ -1,4 +1,40 @@
 ---------------------------------------------------------
+Rev. ID    : 8
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:44:45
+Rev. Prompt: Faz 5E - polish (disk check, manuel record metadata, dosya listesi prefix)
+
+Rev. Report: (
+- Sensor: ortak helper'lar
+    copyToFixed() (sensor_utils): String -> sabit boy null-padded buffer
+      (trigger.cpp'den taşındı, hem manuel hem grab kullanıyor)
+    hasFreeSpaceFor() (file_handlers): LittleFS bos alan kontrolu
+      8 KB safety margin ile, hem /api/start hem /api/trigger_arm
+      onunde calisiyor
+- API: /api/start ve /api/trigger_arm artik:
+    1) Disk dolu olacaksa 507 "Insufficient storage" doner (kayit
+       baslamadan once, header + sample sayisi hesaplanip kontrol edilir)
+    2) meas_point, scan_dir, operator, notes form param'larini
+       g_recMeta'ya kopyalar (FileHeaderV4 metadata bolumune yazilir)
+- Web UI (Live View): manuel kayit kartina iki yeni alan eklendi
+    Measurement point (zorunlu) + Scan direction (Radial-H/V/Axial)
+    startRec() bunlari /api/start'a gonderiyor; bos olursa alert.
+- Web UI (Live View): file list dropdown'unda dosya prefix'i:
+    [G] /grabYYMMDDHHMMSS.dat  -> trigger ile alinan kayit
+    [M] /accelYYMMDDHHMMSS.dat -> manuel kayit
+    Kullanici hangi tipte oldugunu hizla gorebiliyor.
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 71.6% (+1588 byte vs V3.9.7).
+- Firmware: APP_VERSION V3.9.8
+
+NOT: Faz 5 tamamlandi. Sirayla 5A->5E commit'leri:
+  32f7153  Faz 5A header v4 + parsed-header
+  bf67dfc  Faz 5B device identity
+  26d018d  Faz 5C trigger firmware
+  12f4efc  Faz 5D UI split
+  <bu>     Faz 5E polish
+)
+---------------------------------------------------------
 Rev. ID    : 7
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:41:29

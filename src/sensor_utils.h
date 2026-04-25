@@ -46,3 +46,12 @@ void resetLivePreviewState();
 // Reads NVS calibration blob into g_liveSensor and updates g_calibPresent.
 // Safe to call before sensor I2C init (loadCalibrationNVS uses Preferences only).
 void loadCalibrationAtBoot();
+
+// ---- Device identity ----
+// Populates g_device_serial from the chip's MAC and g_device_name from NVS
+// (falling back to "accMeter-XXXXXX" if no name was set yet). Call once at
+// boot, before HTTP routes are registered.
+void loadDeviceIdentity();
+// Persists `name` (max 23 chars) to NVS and updates g_device_name. Returns
+// false if the input is empty or too long.
+bool saveDeviceName(const char *name);

@@ -87,6 +87,7 @@ void setup()
   }
   Serial.println("[BOOT] I2C + mutex ready");
 
+  loadDeviceIdentity();
   loadCalibrationAtBoot();
 
   startWiFiOrAP();

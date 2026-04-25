@@ -10,6 +10,7 @@
 #include "analysis.h"
 #include "live_preview.h"
 #include "file_handlers.h"
+#include "sensor_utils.h"
 
 // ======================= Version =======================
 static String versionJson()
@@ -72,9 +73,49 @@ static String infoJson()
   s += "\"apSsid\":\"" + g_apSsid + "\",";
   s += "\"calibrated\":";
   s += (g_calibPresent ? "true" : "false");
+  s += ",";
+  s += "\"serial\":\"" + jsonEscape(String(g_device_serial)) + "\",";
+  s += "\"deviceName\":\"" + jsonEscape(String(g_device_name)) + "\"";
 
   s += "}";
   return s;
+}
+
+// ======================= Device identity =======================
+static void handleApiDeviceGet()
+{
+  String s = "{";
+  s += "\"serial\":\"" + jsonEscape(String(g_device_serial)) + "\",";
+  s += "\"name\":\"" + jsonEscape(String(g_device_name)) + "\"";
+  s += "}";
+  server.send(200, "application/json", s);
+}
+
+static void handleApiDevicePost()
+{
+  if (g_recording || g_calibratingStatic || g_calibrating6)
+  {
+    server.send(409, "text/plain", "Busy");
+    return;
+  }
+  if (!server.hasArg("name"))
+  {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
+  String name = server.arg("name");
+  name.trim();
+  if (name.length() == 0 || name.length() >= 24)
+  {
+    server.send(400, "text/plain", "Name length 1..23");
+    return;
+  }
+  if (!saveDeviceName(name.c_str()))
+  {
+    server.send(500, "text/plain", "Save failed");
+    return;
+  }
+  server.send(200, "text/plain", "OK");
 }
 
 // ======================= Simple handlers =======================
@@ -225,4 +266,7 @@ void registerRoutes()
   server.on("/api/version", handleApiVersion);
   server.on("/api/analyze", handleApiAnalyze);
   server.on("/api/fft", handleApiFFT);
+
+  server.on("/api/device", HTTP_GET, handleApiDeviceGet);
+  server.on("/api/device", HTTP_POST, handleApiDevicePost);
 }

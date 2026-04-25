@@ -5,7 +5,7 @@ ESP32 + LIS2DW12 MEMS accelerometer based semi-professional machine vibration me
 Designed for ISO 20816 class vibration monitoring on rotating machinery (motors, pumps, fans, compressors).
 
 ## Current Version
-`3.9.4`
+`3.9.5`
 
 ## Tech Stack
 - **MCU:** ESP32 (DOIT DevKit V1)

@@ -1,3 +1,5 @@
+#include <Preferences.h>
+
 #include "sensor_utils.h"
 
 // ---- Cached live-preview sensor ----
@@ -322,6 +324,56 @@ float applyCal1(float g, float offset, float scale)
 float rmsFromSumSq(double sumSq, uint32_t n)
 {
   return (n > 0) ? sqrtf((float)(sumSq / (double)n)) : 0.0f;
+}
+
+// ---- Device identity ----
+void loadDeviceIdentity()
+{
+  // Serial: hex of MAC's last 6 bytes (12 hex chars + null = 13 of 16)
+  uint64_t mac = ESP.getEfuseMac();
+  uint32_t hi = (uint32_t)((mac >> 24) & 0xFFFFFF);
+  uint32_t lo = (uint32_t)(mac & 0xFFFFFF);
+  snprintf(g_device_serial, sizeof(g_device_serial), "%06lX%06lX",
+           (unsigned long)hi, (unsigned long)lo);
+
+  Preferences pref;
+  bool loaded = false;
+  if (pref.begin("device", true))
+  {
+    String n = pref.getString("name", "");
+    pref.end();
+    if (n.length() > 0 && n.length() < sizeof(g_device_name))
+    {
+      memset(g_device_name, 0, sizeof(g_device_name));
+      memcpy(g_device_name, n.c_str(), n.length());
+      loaded = true;
+    }
+  }
+  if (!loaded)
+  {
+    // Default: accMeter-XXXXXX (last 6 hex chars of serial -> short tag)
+    snprintf(g_device_name, sizeof(g_device_name), "accMeter-%06lX",
+             (unsigned long)lo);
+  }
+
+  Serial.printf("[ID] serial=%s  name=%s\n", g_device_serial, g_device_name);
+}
+
+bool saveDeviceName(const char *name)
+{
+  if (!name) return false;
+  size_t L = strlen(name);
+  if (L == 0 || L >= sizeof(g_device_name)) return false;
+
+  Preferences pref;
+  if (!pref.begin("device", false)) return false;
+  size_t wrote = pref.putString("name", name);
+  pref.end();
+  if (wrote != L) return false;
+
+  memset(g_device_name, 0, sizeof(g_device_name));
+  memcpy(g_device_name, name, L);
+  return true;
 }
 
 // ---- Calibration boot-load ----

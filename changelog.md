@@ -1,4 +1,25 @@
 ---------------------------------------------------------
+Rev. ID    : 5
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:28:41
+Rev. Prompt: Faz 5B - device identity (serial + isim) NVS persistence
+
+Rev. Report: (
+- Firmware: loadDeviceIdentity() boot'ta cagrilip g_device_serial'i MAC'in
+  son 12 hex karakteriyle, g_device_name'i ise NVS namespace="device"
+  key="name"'den dolduruyor. Bos durumda default "accMeter-XXXXXX"
+  (XXXXXX = MAC son 6 hex). Ilk acilista her cihaz benzersiz isim alir.
+- Firmware: saveDeviceName() NVS'ye yazip global'i guncelleyen helper.
+- API: GET /api/device -> {serial, name}
+- API: POST /api/device name=... -> NVS save (isim 1..23 karakter)
+- API: /api/info JSON cevabi "serial" ve "deviceName" alanlarini iceriyor
+  (UI bu degerleri header'da goruntulemeli).
+- Recording: V4 header bu degerleri alip dosyaya yaziyor (5A'da hazirlanmisti).
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 69.7% (+2328 byte vs V3.9.4).
+- Firmware: APP_VERSION V3.9.5
+)
+---------------------------------------------------------
 Rev. ID    : 4
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:21:27

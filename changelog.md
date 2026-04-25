@@ -1,4 +1,35 @@
 ---------------------------------------------------------
+Rev. ID    : 9
+Rev. Date  : 25.04.2026
+Rev. Time  : 10:54:29
+Rev. Prompt: 1) date format DD/MM/YYYY 24H, 2) Scan direction icin G->C ve C->G
+
+Rev. Report: (
+Cihazda yapilan ilk testten gelen 3 issue'dan 2'si UI/lokalizasyon
+duzeltmesi.
+
+- Web UI: GRAB nowPretty() Date.toLocaleString() yerine sabit format
+    DD/MM/YYYY HH:MM:SS (24H). Browser locale'inden bagimsiz, tutarli
+    Turkiye gosterimi.
+- Web UI: LIVE prettyName() dosya listesi etiketi
+    yy-MM-DD HH:mm:ss -> DD/MM/20yy HH:mm:ss
+    (24H, dorde tam yil). [G]/[M] prefix korundu.
+- Web UI: Scan direction dropdown'una iki yeni secenek (hem GRAB hem LIVE)
+    "X_GC" -> "G->C (X axis, Z=gravity)"
+    "X_CG" -> "C->G (X axis, Z=gravity)"
+    Cihaz Z=yercekimi yonunde dik durdugunda X ekseni boyunca
+    yapilan tarama yonunu kayit eder. FileHeaderV4 scan_dir alanina
+    "X_GC" / "X_CG" string'i olarak yazilir; CSV header'da da bu deger
+    aynen gozukur.
+
+NOT: 3. issue (UI 3.9.7 gosteriyor) bir bug degil; cihazda V3.9.7
+firmware yuklu. /update sayfasindan binaries/accMeter2_V3.9.9.bin'i
+flash'lamak yeterli.
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 71.7% (+592 byte vs V3.9.8).
+- Firmware: APP_VERSION V3.9.9
+)
+---------------------------------------------------------
 Rev. ID    : 8
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:44:45

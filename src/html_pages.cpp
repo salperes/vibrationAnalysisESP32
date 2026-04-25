@@ -236,6 +236,8 @@ const char LIVE_HTML[] PROGMEM = R"HTML(
         <option value="RADIAL_H">Radial - Horizontal</option>
         <option value="RADIAL_V">Radial - Vertical</option>
         <option value="AXIAL">Axial</option>
+        <option value="X_GC">G-&gt;Ç (X axis, Z=gravity)</option>
+        <option value="X_CG">Ç-&gt;G (X axis, Z=gravity)</option>
       </select>
 
       <div class="small" style="margin-top:10px">
@@ -485,7 +487,7 @@ function prettyName(filePath){
   const HH = ts.slice(6,8);
   const mm = ts.slice(8,10);
   const ss = ts.slice(10,12);
-  return `${tag} ${n}  [${yy}-${MM}-${DD} ${HH}:${mm}:${ss}]`;
+  return `${tag} ${n}  [${DD}/${MM}/20${yy} ${HH}:${mm}:${ss}]`;
 }
 
 let lastRecording = null;
@@ -1005,6 +1007,8 @@ const char GRAB_HTML[] PROGMEM = R"HTML(
         <option value="RADIAL_H">Radial - Horizontal</option>
         <option value="RADIAL_V">Radial - Vertical</option>
         <option value="AXIAL">Axial</option>
+        <option value="X_GC">G-&gt;Ç (X axis, Z=gravity)</option>
+        <option value="X_CG">Ç-&gt;G (X axis, Z=gravity)</option>
       </select>
 
       <label>Operator</label>
@@ -1131,7 +1135,13 @@ function tsYYMMDDHHMMSS(){
 }
 function nowPretty(){
   const d = new Date();
-  return d.toLocaleString();
+  const DD = String(d.getDate()).padStart(2,'0');
+  const MM = String(d.getMonth()+1).padStart(2,'0');
+  const YYYY = d.getFullYear();
+  const HH = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  return DD+'/'+MM+'/'+YYYY+' '+HH+':'+mm+':'+ss;
 }
 
 async function loadVersion(){

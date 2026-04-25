@@ -232,6 +232,11 @@ void handleDownloadCSV()
     hdr += "# operator=" + String(h.operator_name) + "\n";
     hdr += "# notes=" + String(h.notes) + "\n";
   }
+  if (h.version >= 5)
+  {
+    hdr += "# scanned_system_serial=" + String(h.scanned_system_serial) + "\n";
+    hdr += "# firmware_version=" + String(h.firmware_version) + "\n";
+  }
   hdr += "t_ms,ax_raw,ay_raw,az_raw\n";
 
   server.sendContent(hdr);

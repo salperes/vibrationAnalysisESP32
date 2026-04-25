@@ -23,9 +23,8 @@ struct FileHeaderV3
   float cal_scale[3];
 }; // 48 bytes
 
-// V4 adds trigger info + measurement metadata. New recordings (manual or
-// triggered) write this format. Magic is identical to V3 so the same
-// "LIS2DW12" prefix gates both; readers branch on the version field.
+// V4 (legacy, read-only). New recordings write V5. Kept here so any V4 .dat
+// files captured during early grab-mode testing still parse and analyze.
 struct FileHeaderV4
 {
   // Identity (10 B)
@@ -61,14 +60,58 @@ struct FileHeaderV4
   char notes[64];
 }; // 214 bytes
 
+// V5 extends V4 with two more metadata strings: the serial number of the
+// machine being scanned (user-supplied) and the firmware version that
+// produced the file (auto from APP_VERSION). Layout up through `notes` is
+// identical to V4; new fields are appended.
+struct FileHeaderV5
+{
+  // Identity (10 B) -- magic and version match V4's prefix
+  char     magic[8];          // "LIS2DW12"
+  uint16_t version;           // 5
+
+  // Acquisition (12 B)
+  uint16_t rate_hz;
+  uint16_t record_s;
+  uint32_t samples;
+  uint8_t  fs_g;
+  uint8_t  res_bits;
+  uint8_t  q_bits;
+  uint8_t  flags;             // bit0: triggered, bit1: truncated
+
+  // Calibration (24 B)
+  float cal_offset_g[3];
+  float cal_scale[3];
+
+  // Trigger info (12 B)
+  uint32_t pre_samples;
+  float    threshold_used;
+  uint8_t  trig_mode;
+  uint8_t  trig_mult;
+  uint16_t reserved;
+
+  // Per-recording metadata strings (156 B)
+  char serial_no[16];         // device's own serial (auto from MAC)
+  char device_name[24];
+  char meas_point[24];
+  char scan_dir[12];
+  char operator_name[16];
+  char notes[64];
+
+  // V5 additions (36 B)
+  char scanned_system_serial[24]; // serial of the machine being scanned
+  char firmware_version[12];      // e.g. "V3.9.10"
+}; // 250 bytes
+
 struct Sample6
 {
   int16_t ax, ay, az; // aligned raw
 };
 #pragma pack(pop)
 
-static_assert(sizeof(FileHeaderV3) == 46, "FileHeaderV3 size mismatch");
+static_assert(sizeof(FileHeaderV3) == 46,  "FileHeaderV3 size mismatch");
 static_assert(sizeof(FileHeaderV4) == 214, "FileHeaderV4 size mismatch");
+static_assert(sizeof(FileHeaderV5) == 250, "FileHeaderV5 size mismatch");
 
 // Version-agnostic header view used by analyze / FFT / CSV. V3 fields are
 // always present; V4-only fields are zero-filled when reading a V3 file.
@@ -101,6 +144,10 @@ struct ParsedHeader
   char scan_dir[12];
   char operator_name[16];
   char notes[64];
+
+  // V5 metadata (empty strings for V3/V4)
+  char scanned_system_serial[24];
+  char firmware_version[12];
 };
 
 struct RecConfig
@@ -114,13 +161,15 @@ struct RecConfig
 
 // Per-recording user-supplied metadata. Filled by /api/start (manual) or
 // /api/trigger_arm (grab) before the recording task starts. Stored verbatim
-// in FileHeaderV4 so each .dat is self-describing.
+// in FileHeaderV5 so each .dat is self-describing. Device's own serial and
+// firmware version come from globals/APP_VERSION (not RecMetadata).
 struct RecMetadata
 {
   char meas_point[24];
   char scan_dir[12];
   char operator_name[16];
   char notes[64];
+  char scanned_system_serial[24]; // serial of the machine being measured
 };
 
 extern WebServer server;

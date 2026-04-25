@@ -189,6 +189,42 @@ bool readParsedHeader(File &f, ParsedHeader &out)
     return true;
   }
 
+  if (version == 5)
+  {
+    if (f.size() < (int)sizeof(FileHeaderV5))
+      return false;
+    FileHeaderV5 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) != sizeof(h))
+      return false;
+    out.version        = 5;
+    out.header_bytes   = sizeof(FileHeaderV5);
+    out.rate_hz        = h.rate_hz;
+    out.record_s       = h.record_s;
+    out.samples        = h.samples;
+    out.fs_g           = h.fs_g;
+    out.res_bits       = h.res_bits;
+    out.q_bits         = h.q_bits;
+    out.flags          = h.flags;
+    for (int i = 0; i < 3; i++)
+    {
+      out.cal_offset_g[i] = h.cal_offset_g[i];
+      out.cal_scale[i]    = h.cal_scale[i];
+    }
+    out.pre_samples    = h.pre_samples;
+    out.threshold_used = h.threshold_used;
+    out.trig_mode      = h.trig_mode;
+    out.trig_mult      = h.trig_mult;
+    memcpy(out.serial_no,             h.serial_no,             sizeof(out.serial_no));
+    memcpy(out.device_name,           h.device_name,           sizeof(out.device_name));
+    memcpy(out.meas_point,            h.meas_point,            sizeof(out.meas_point));
+    memcpy(out.scan_dir,              h.scan_dir,              sizeof(out.scan_dir));
+    memcpy(out.operator_name,         h.operator_name,         sizeof(out.operator_name));
+    memcpy(out.notes,                 h.notes,                 sizeof(out.notes));
+    memcpy(out.scanned_system_serial, h.scanned_system_serial, sizeof(out.scanned_system_serial));
+    memcpy(out.firmware_version,      h.firmware_version,      sizeof(out.firmware_version));
+    return true;
+  }
+
   return false; // unsupported version
 }
 
@@ -232,6 +268,16 @@ bool rewriteHeaderSamples(const String &path, uint32_t samplesWritten)
   else if (version == 4)
   {
     FileHeaderV4 h;
+    if (f.read((uint8_t *)&h, sizeof(h)) == sizeof(h))
+    {
+      h.samples = samplesWritten;
+      f.seek(0, SeekSet);
+      ok = (f.write((uint8_t *)&h, sizeof(h)) == sizeof(h));
+    }
+  }
+  else if (version == 5)
+  {
+    FileHeaderV5 h;
     if (f.read((uint8_t *)&h, sizeof(h)) == sizeof(h))
     {
       h.samples = samplesWritten;

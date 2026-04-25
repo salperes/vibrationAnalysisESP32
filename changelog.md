@@ -1,4 +1,42 @@
 ---------------------------------------------------------
+Rev. ID    : 10
+Rev. Date  : 25.04.2026
+Rev. Time  : 11:07:40
+Rev. Prompt: 1) metadata icin scanned-system-S/N + firmware version, 2) ready/recording/stopped state'leri UI'da gozuksun
+
+Rev. Report: (
+- Sensor: file header schema v4 -> v5 bump (FileHeaderV5, 250 byte). V4
+  okuma destegi korundu (legacy dosyalar parse oluyor). Yeni alanlar:
+    scanned_system_serial[24] -- olculen makinanin seri no'su (kullanici)
+    firmware_version[12]      -- APP_VERSION otomatik (her recordTask basinda
+                                 derleme aninda)
+  ParsedHeader genisletildi; v3/v4 dosyalarda bu alanlar bos string olarak
+  doner.
+- Firmware: RecMetadata struct'ina `scanned_system_serial[24]` eklendi.
+  hem /api/start hem /api/trigger_arm form param'inda "scanned_serial"
+  bekliyor; copyToFixed ile global'a aktariliyor.
+- Sensor: rewriteHeaderSamples + readParsedHeader v5 dalini destekliyor.
+  CSV preamble v5 dosyalarda iki yeni satir emit ediyor (#scanned_system_serial=,
+  #firmware_version=).
+- Web UI (Grab Mode): Measurement Metadata kartina "Scanned system S/N"
+  inputu eklendi (opsiyonel, max 23 char). armGrab() form'a koyup gonderiyor.
+- Web UI (Live View): Settings kartina ayni input eklendi (opsiyonel).
+- Web UI (Grab Mode): durum etiketleri kullanici icin daha anlamli isimlendirildi:
+    IDLE       -- ilk durum, "fill metadata and ARM"
+    Armed      -> "READY -- waiting for motion"  (eski: ARMED)
+    Triggered  -> "RECORDING"                    (eski: TRIGGERED)
+    PostTail   -> "RECORDING -- settling"        (eski: POST-TAIL)
+    Idle (just-after-capture) -> "STOPPED -- saved"  (yeni transient state)
+  STOPPED state Triggered/PostTail -> Idle gecisinden 10 saniye sonra
+  otomatik IDLE'a doner (browser-side, _stoppedAt timestamp ile takip ediliyor).
+  Boylece kullanici "ne zaman bitti?" sorusunu UI'a bakarak yanitliyor.
+- Schema bump uyarisi: V4 dosyalar (eger varsa) hala okunabilir; ama yeni
+  recording'ler V5 yazacak. Mevcut V3 dosyalar da hala okunabilir.
+
+Build: pio run -> SUCCESS, RAM 14.1%, Flash 71.9% (+2700 byte vs V3.9.9).
+- Firmware: APP_VERSION V3.9.10
+)
+---------------------------------------------------------
 Rev. ID    : 9
 Rev. Date  : 25.04.2026
 Rev. Time  : 10:54:29

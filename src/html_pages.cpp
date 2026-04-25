@@ -228,6 +228,9 @@ const char LIVE_HTML[] PROGMEM = R"HTML(
         <option value="120">120</option>
       </select>
 
+      <label for="liveScannedSerial" style="margin-top:10px">Scanned system S/N</label>
+      <input id="liveScannedSerial" placeholder="(optional)" maxlength="23" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #bbb"/>
+
       <label for="liveMeasPoint" style="margin-top:10px">Measurement point *</label>
       <input id="liveMeasPoint" placeholder="e.g. Motor-DE" maxlength="23" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #bbb"/>
 
@@ -648,11 +651,12 @@ async function startRec(){
   const ts = tsYYMMDDHHMMSS();
   const meas_point = document.getElementById("liveMeasPoint").value.trim();
   const scan_dir   = document.getElementById("liveScanDir").value;
+  const scanned_serial = document.getElementById("liveScannedSerial").value.trim();
 
   if(!meas_point){ alert('Measurement point is required'); return; }
   if(!scan_dir)  { alert('Scan direction is required');    return; }
 
-  const r = await postText('/api/start', {hz, fs, sec, ts, meas_point, scan_dir});
+  const r = await postText('/api/start', {hz, fs, sec, ts, meas_point, scan_dir, scanned_serial});
   if(!r.ok) alert(r.text);
   else toast("STARTED");
 
@@ -999,6 +1003,9 @@ const char GRAB_HTML[] PROGMEM = R"HTML(
       <label>Date / Time</label>
       <span id="ts" class="mono small">auto from browser</span>
 
+      <label>Scanned system S/N</label>
+      <input id="scannedSerial" placeholder="serial of the machine being measured" maxlength="23"/>
+
       <label class="req">Measurement point</label>
       <input id="measPoint" placeholder="e.g. Motor-DE" maxlength="23" required/>
 
@@ -1177,19 +1184,39 @@ function updateThrMode(){
   document.getElementById('manThr').disabled = (mode === '0');
 }
 
+// State pipeline shown to the user (firmware enum -> friendly label):
+//   Idle      -> "IDLE"        gray
+//   Armed     -> "READY"       amber  (after START GRAB, waiting for motion)
+//   Triggered -> "RECORDING"   red    (motion detected, writing data)
+//   PostTail  -> "RECORDING"   red    (still writing, settling tail)
+//   Idle (just-after-recording) -> "STOPPED" green for 10 s, then "IDLE"
 function setStateUI(state, j){
   const lbl = document.getElementById('stateLabel');
   const det = document.getElementById('stateDetail');
   lbl.classList.remove('stateIdle','stateArmed','stateTrig','statePost','stateDone');
   let txt = '';
+
+  // Transient STOPPED window: shown for 10 s after a triggered capture
+  // finalizes. _stoppedAt is set in refreshInfo() on the transition.
+  const showStopped = (state === 'Idle' && _stoppedAt > 0 &&
+                       (Date.now() - _stoppedAt) < 10000);
+  if (showStopped) {
+    lbl.textContent = 'STOPPED — saved';
+    lbl.classList.add('stateDone');
+    det.textContent = _stoppedFile
+      ? ('Last file: ' + _stoppedFile + '\n(reverting to IDLE in a few seconds)')
+      : '(saved)';
+    return;
+  }
+
   switch(state){
     case 'Idle':
       lbl.textContent = 'IDLE';
       lbl.classList.add('stateIdle');
-      txt = 'Fill in the metadata above and press ARM to start.';
+      txt = 'Fill in the metadata above and press START GRAB to arm.';
       break;
     case 'Armed': {
-      lbl.textContent = 'ARMED — waiting for motion';
+      lbl.textContent = 'READY — waiting for motion';
       lbl.classList.add('stateArmed');
       const armed = ((j.trigArmedMs||0)/1000).toFixed(1);
       const baseline = (j.trigBaseline||0).toFixed(4);
@@ -1199,7 +1226,7 @@ function setStateUI(state, j){
       break;
     }
     case 'Triggered': {
-      lbl.textContent = 'TRIGGERED — recording';
+      lbl.textContent = 'RECORDING';
       lbl.classList.add('stateTrig');
       const fired = ((j.trigFiredMs||0)/1000).toFixed(1);
       const cur = (j.trigCurrentRms||0).toFixed(4);
@@ -1209,7 +1236,7 @@ function setStateUI(state, j){
       break;
     }
     case 'PostTail': {
-      lbl.textContent = 'POST-TAIL — finalizing';
+      lbl.textContent = 'RECORDING — settling';
       lbl.classList.add('statePost');
       const fired = ((j.trigFiredMs||0)/1000).toFixed(1);
       const samples = j.samples || 0;
@@ -1221,12 +1248,12 @@ function setStateUI(state, j){
 }
 
 let _lastTrigState = 'Idle';
-let _lastFile = '';
+let _stoppedAt = 0;       // ms epoch when capture finished (for transient STOPPED state)
+let _stoppedFile = '';
 async function refreshInfo(){
   try{
     const j = await getJson('/api/info');
     const state = j.trigState || 'Idle';
-    setStateUI(state, j);
 
     document.getElementById('calBadge').textContent = j.calibrated ? 'CAL' : 'UNCAL';
     document.getElementById('calBadge').className   = 'badge ' + (j.calibrated ? 'cal' : 'uncal');
@@ -1234,17 +1261,30 @@ async function refreshInfo(){
     document.getElementById('armBtn').disabled    = (state !== 'Idle');
     document.getElementById('disarmBtn').disabled = (state === 'Idle');
 
-    // Detect transition Triggered/PostTail -> Idle (capture finished)
-    if(_lastTrigState !== 'Idle' && state === 'Idle' && j.currentFile){
-      document.getElementById('lastFileCard').style.display = '';
-      document.getElementById('lastFile').textContent =
-        `${j.currentFile}  (samples=${j.samples})`;
-      toast('Saved: ' + j.currentFile);
+    // Detect transition Triggered/PostTail -> Idle (capture finished).
+    // Latch the transient STOPPED state for setStateUI to display.
+    if(_lastTrigState !== 'Idle' && state === 'Idle'){
+      _stoppedAt = Date.now();
+      _stoppedFile = j.currentFile || '';
+      if(j.currentFile){
+        document.getElementById('lastFileCard').style.display = '';
+        document.getElementById('lastFile').textContent =
+          `${j.currentFile}  (samples=${j.samples})`;
+        toast('Saved: ' + j.currentFile);
+      }
+    }
+    // Clear the transient STOPPED state once 10 s have passed; setStateUI
+    // will then fall through to plain IDLE rendering.
+    if(_stoppedAt > 0 && (Date.now() - _stoppedAt) >= 10000){
+      _stoppedAt = 0;
+      _stoppedFile = '';
     }
     _lastTrigState = state;
 
+    setStateUI(state, j);
+
     // Update timestamp display while idle
-    if(state === 'Idle'){
+    if(state === 'Idle' && _stoppedAt === 0){
       document.getElementById('ts').textContent = nowPretty() + ' (will be auto-set on ARM)';
     }
   }catch(e){ console.warn('refreshInfo', e); }
@@ -1266,10 +1306,11 @@ async function armGrab(){
     mult:  document.getElementById('mult').value,
     abs_thr: document.getElementById('manThr').value,
     ts:    tsYYMMDDHHMMSS(),
-    meas_point: measPoint,
-    scan_dir:   scanDir,
-    operator:   document.getElementById('operator').value.trim(),
-    notes:      document.getElementById('notes').value.trim()
+    meas_point:     measPoint,
+    scan_dir:       scanDir,
+    operator:       document.getElementById('operator').value.trim(),
+    notes:          document.getElementById('notes').value.trim(),
+    scanned_serial: document.getElementById('scannedSerial').value.trim()
   };
 
   const r = await postText('/api/trigger_arm', params);

@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 
 #include "app_state.h"
+#include "config.h"        // APP_VERSION for FileHeaderV5
 #include "recording.h"
 #include "sensor_utils.h"
 #include "file_handlers.h"
@@ -154,9 +155,9 @@ static void recordTask(void * /*arg*/)
     return;
   }
 
-  FileHeaderV4 h{};
+  FileHeaderV5 h{};
   memcpy(h.magic, "LIS2DW12", 8);
-  h.version  = 4;
+  h.version  = 5;
   h.rate_hz  = g_cfg.hz;
   h.record_s = g_cfg.sec;
   h.samples  = 0;
@@ -175,12 +176,15 @@ static void recordTask(void * /*arg*/)
   h.trig_mode      = 0xFF;
   h.trig_mult      = 0;
   // Metadata: copy globals (already null-padded).
-  memcpy(h.serial_no,     g_device_serial,    sizeof(h.serial_no));
-  memcpy(h.device_name,   g_device_name,      sizeof(h.device_name));
-  memcpy(h.meas_point,    g_recMeta.meas_point,    sizeof(h.meas_point));
-  memcpy(h.scan_dir,      g_recMeta.scan_dir,      sizeof(h.scan_dir));
-  memcpy(h.operator_name, g_recMeta.operator_name, sizeof(h.operator_name));
-  memcpy(h.notes,         g_recMeta.notes,         sizeof(h.notes));
+  memcpy(h.serial_no,             g_device_serial,                 sizeof(h.serial_no));
+  memcpy(h.device_name,           g_device_name,                   sizeof(h.device_name));
+  memcpy(h.meas_point,            g_recMeta.meas_point,            sizeof(h.meas_point));
+  memcpy(h.scan_dir,              g_recMeta.scan_dir,              sizeof(h.scan_dir));
+  memcpy(h.operator_name,         g_recMeta.operator_name,         sizeof(h.operator_name));
+  memcpy(h.notes,                 g_recMeta.notes,                 sizeof(h.notes));
+  memcpy(h.scanned_system_serial, g_recMeta.scanned_system_serial, sizeof(h.scanned_system_serial));
+  // Firmware version: APP_VERSION macro at compile time.
+  copyToFixed(String(APP_VERSION), h.firmware_version, sizeof(h.firmware_version));
 
   if (f.write((uint8_t *)&h, sizeof(h)) != sizeof(h))
   {
@@ -350,10 +354,11 @@ void handleApiStart()
 
   // Optional metadata params (Live View collects meas_point/scan_dir; the
   // others are free-form). Empty strings are fine -- header just stores blanks.
-  copyToFixed(server.arg("meas_point"), g_recMeta.meas_point,    sizeof(g_recMeta.meas_point));
-  copyToFixed(server.arg("scan_dir"),   g_recMeta.scan_dir,      sizeof(g_recMeta.scan_dir));
-  copyToFixed(server.arg("operator"),   g_recMeta.operator_name, sizeof(g_recMeta.operator_name));
-  copyToFixed(server.arg("notes"),      g_recMeta.notes,         sizeof(g_recMeta.notes));
+  copyToFixed(server.arg("meas_point"),     g_recMeta.meas_point,            sizeof(g_recMeta.meas_point));
+  copyToFixed(server.arg("scan_dir"),       g_recMeta.scan_dir,              sizeof(g_recMeta.scan_dir));
+  copyToFixed(server.arg("operator"),       g_recMeta.operator_name,         sizeof(g_recMeta.operator_name));
+  copyToFixed(server.arg("notes"),          g_recMeta.notes,                 sizeof(g_recMeta.notes));
+  copyToFixed(server.arg("scanned_serial"), g_recMeta.scanned_system_serial, sizeof(g_recMeta.scanned_system_serial));
 
   g_cfg.hz = hz;
   g_cfg.sec = sec;

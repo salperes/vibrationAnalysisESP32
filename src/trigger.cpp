@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 
 #include "trigger.h"
+#include "config.h"         // APP_VERSION for FileHeaderV5
 #include "recording.h"      // startTimerHz, stopTimer, consumeTimerDue, resetTimerDue
 #include "sensor_utils.h"
 #include "file_handlers.h"  // rebuildListCache
@@ -301,9 +302,9 @@ static void triggerTask(void *arg)
     return;
   }
 
-  FileHeaderV4 h{};
+  FileHeaderV5 h{};
   memcpy(h.magic, "LIS2DW12", 8);
-  h.version  = 4;
+  h.version  = 5;
   h.rate_hz  = ctx.hz;
   h.record_s = g_trigMaxS;
   h.samples  = 0;
@@ -319,12 +320,14 @@ static void triggerTask(void *arg)
   h.threshold_used = g_trigEffThreshold;
   h.trig_mode      = g_trigMode;
   h.trig_mult      = (g_trigMode == 0) ? g_trigMult : 0;
-  memcpy(h.serial_no,     g_device_serial,         sizeof(h.serial_no));
-  memcpy(h.device_name,   g_device_name,           sizeof(h.device_name));
-  memcpy(h.meas_point,    g_recMeta.meas_point,    sizeof(h.meas_point));
-  memcpy(h.scan_dir,      g_recMeta.scan_dir,      sizeof(h.scan_dir));
-  memcpy(h.operator_name, g_recMeta.operator_name, sizeof(h.operator_name));
-  memcpy(h.notes,         g_recMeta.notes,         sizeof(h.notes));
+  memcpy(h.serial_no,             g_device_serial,                 sizeof(h.serial_no));
+  memcpy(h.device_name,           g_device_name,                   sizeof(h.device_name));
+  memcpy(h.meas_point,            g_recMeta.meas_point,            sizeof(h.meas_point));
+  memcpy(h.scan_dir,              g_recMeta.scan_dir,              sizeof(h.scan_dir));
+  memcpy(h.operator_name,         g_recMeta.operator_name,         sizeof(h.operator_name));
+  memcpy(h.notes,                 g_recMeta.notes,                 sizeof(h.notes));
+  memcpy(h.scanned_system_serial, g_recMeta.scanned_system_serial, sizeof(h.scanned_system_serial));
+  copyToFixed(String(APP_VERSION), h.firmware_version, sizeof(h.firmware_version));
   if (f.write((uint8_t *)&h, sizeof(h)) != sizeof(h)) {
     Serial.println("[TRIG] Header write failed");
     cleanupAndExit(&f, &ring, &win, true);
@@ -525,10 +528,11 @@ void handleApiTriggerArm()
   }
 
   // ---- Metadata strings (truncated to fixed-buffer caps) ----
-  copyToFixed(server.arg("meas_point"), g_recMeta.meas_point, sizeof(g_recMeta.meas_point));
-  copyToFixed(server.arg("scan_dir"),   g_recMeta.scan_dir,   sizeof(g_recMeta.scan_dir));
-  copyToFixed(server.arg("operator"),   g_recMeta.operator_name, sizeof(g_recMeta.operator_name));
-  copyToFixed(server.arg("notes"),      g_recMeta.notes,      sizeof(g_recMeta.notes));
+  copyToFixed(server.arg("meas_point"),     g_recMeta.meas_point,            sizeof(g_recMeta.meas_point));
+  copyToFixed(server.arg("scan_dir"),       g_recMeta.scan_dir,              sizeof(g_recMeta.scan_dir));
+  copyToFixed(server.arg("operator"),       g_recMeta.operator_name,         sizeof(g_recMeta.operator_name));
+  copyToFixed(server.arg("notes"),          g_recMeta.notes,                 sizeof(g_recMeta.notes));
+  copyToFixed(server.arg("scanned_serial"), g_recMeta.scanned_system_serial, sizeof(g_recMeta.scanned_system_serial));
 
   // Pre-flight disk check: header + (pre + max + post) * hz samples + safety
   const size_t totalS = (size_t)pre_s + (size_t)max_s + (size_t)post_s;

@@ -70,6 +70,7 @@ Donen makinalarin (motor, pompa, fan, kompresor vb.) titresim seviyelerini olcen
 #### FR-3.1.2 Sensor Konfigurasyonu
 - Kullanici web arayuzunden asagidaki parametreleri secebilir:
   - **Ornekleme hizi (Hz):** 1.6, 12.5, 25, 50, 100, 200, 400, 800, 1600
+    - UI'da tamsayi olarak gonderilir: 2→1.6 Hz (LP ozel), 13→12.5 Hz; diger degerler birebir
   - **Tam olcek (g):** 2, 4, 8, 16
   - **Calima modu:** High Performance / Low Power
 - Konfigrasyon kayit baslatildiginda sensore uygulanir
@@ -133,13 +134,13 @@ Donen makinalarin (motor, pompa, fan, kompresor vb.) titresim seviyelerini olcen
 
 #### FR-3.4.1 Statik Kalibrasyon (Tek Pozisyon)
 - Cihaz duz yuzey uzerine yerlestirilir (Z+ yukari)
-- 500 ornek ortalamasiyla offset ve scale hesaplanir
+- 600 ornek ortalamasiyla offset ve scale hesaplanir
 - Z ekseni referansi: 1g (yercekim)
 - Sonuc NVS'ye kaydedilir (POST `/api/calibrate_static`)
 
 #### FR-3.4.2 6-Pozisyon Kalibrasyon
 - 6 yonlendirme adimi (X+, X-, Y+, Y-, Z+, Z-)
-- Her pozisyonda 500 ornek toplanir
+- Her pozisyonda 700 ornek toplanir
 - 3 eksen icin bagimsiz offset ve scale hesabi
 - Sonuc NVS'ye kaydedilir (POST `/api/calibrate6`)
 - Web arayuzunden adim adim yonlendirilir

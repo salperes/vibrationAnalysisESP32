@@ -307,6 +307,8 @@ void handleApiFFT()
   FFT.Compute(FFT_FORWARD);
   FFT.ComplexToMagnitude();
 
+  // Scale by 2/N for single-sided amplitude spectrum (g amplitude)
+  const double fftScale = 2.0 / (double)maxSamples;
   uint32_t bins = maxSamples / 2;
   double df = (double)h.rate_hz / (double)maxSamples;
 
@@ -327,7 +329,7 @@ void handleApiFFT()
 
   for (uint32_t i = 1; i < bins; i++)
   {
-    double mag = vReal[i];
+    double mag = vReal[i] * fftScale;
     double hz = i * df;
 
     if (mag > peakMag)
